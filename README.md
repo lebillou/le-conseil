@@ -6,7 +6,9 @@ Le jeu s'inspire du principe des serious games de formation à la stratégie, co
 
 ## Jouer
 
-Ouvrir `index.html` dans un navigateur : le fichier est autonome, sans serveur ni installation. La partie en cours est sauvegardée dans le navigateur.
+En ligne : https://lebillou.github.io/le-conseil/
+
+Ou ouvrir `index.html` dans un navigateur : le fichier est autonome, sans serveur ni installation. La partie en cours est sauvegardée dans le navigateur.
 
 ## Contenu
 
