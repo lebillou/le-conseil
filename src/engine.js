@@ -7,9 +7,14 @@ var ENGINE = (function () {
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
   const sum = (arr, f) => arr.reduce((s, x) => s + (f ? f(x) : x), 0);
 
-  /* ---------- Aléa reproductible (mulberry32, état dans G) ---------- */
-  function rnd(G) {
-    let a = (G.rng = (G.rng + 0x6D2B79F5) | 0);
+  /* ---------- Aléa reproductible (mulberry32, état dans G) ----------
+     Deux flux indépendants : G.rng pour la conjoncture (demande, événements, taux),
+     G.rngAI pour les décisions des concurrents. Le nombre de tirages du premier ne
+     dépend jamais des décisions : une même graine rejoue la même conjoncture. */
+  const VERSION = 2;
+  function rnd(G, key) {
+    key = key || "rng";
+    let a = (G[key] = (G[key] + 0x6D2B79F5) | 0);
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -124,13 +129,13 @@ var ENGINE = (function () {
         { id: "D", name: "Rotaia", color: "#7A5AA6", persona: "conquerant", cash: 0.10, debt: 0.40, debtYears: 7 }
       ],
       segments: [
-        { id: "gvfr", name: "Grande vitesse France", group: "rail", D0: 900, path: [[0, 0.03], [20, 0.025]], capex: 2.4, slope: 0.85, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.35,
+        { id: "gvfr", name: "Grande vitesse France", group: "rail", D0: 900, path: [[0, 0.03], [20, 0.025]], capex: 2.4, slope: 0.90, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.8,
           pos: { A: 0.85, D: 0.15 } },
-        { id: "gvde", name: "Grande vitesse Allemagne", group: "rail", D0: 700, path: [[0, 0.04], [20, 0.03]], capex: 2.4, slope: 0.85, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.35,
+        { id: "gvde", name: "Grande vitesse Allemagne", group: "rail", D0: 700, path: [[0, 0.04], [20, 0.03]], capex: 2.4, slope: 0.90, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.8,
           pos: { B: 0.90, A: 0.10 } },
-        { id: "gves", name: "Grande vitesse Espagne", group: "rail", D0: 450, path: [[0, 0.09], [8, 0.06], [20, 0.035]], capex: 2.4, slope: 0.84, mu: 0.25, eps: 1.4, dep: 0.05, vol: 0.012, H: 8, entryX: 0.40,
+        { id: "gves", name: "Grande vitesse Espagne", group: "rail", D0: 450, path: [[0, 0.09], [8, 0.06], [20, 0.035]], capex: 2.4, slope: 0.90, mu: 0.25, eps: 1.4, dep: 0.05, vol: 0.012, H: 8, entryX: 0.8,
           pos: { C: 0.60, A: 0.20, D: 0.20 } },
-        { id: "gvit", name: "Grande vitesse Italie", group: "rail", D0: 500, path: [[0, 0.05], [20, 0.035]], capex: 2.4, slope: 0.85, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.35,
+        { id: "gvit", name: "Grande vitesse Italie", group: "rail", D0: 500, path: [[0, 0.05], [20, 0.035]], capex: 2.4, slope: 0.90, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.8,
           pos: { D: 0.72, A: 0.28 } },
         { id: "icfr", name: "Intercités France", group: "rail", D0: 400, path: [[0, -0.02], [20, -0.03]], capex: 1.6, slope: 0.88, mu: 0.20, eps: 1.3, dep: 0.06, vol: 0.010, H: 12,
           pos: { A: 0.90, P: 0.10 } },
@@ -196,8 +201,18 @@ var ENGINE = (function () {
   const DEFAULT_PARAMS = {
     tax: 0.25, rate: 0.03, maxDE: 1.5, ebitdaMult: 3, maxLoanYears: 8,
     maxDil: 0.20, maxBuyback: 0.10, cap: 0.55, recov: 0.40, issueDisc: 0.10,
-    bcgG: 0.05, overdraft: 0.12, odPremium: 0.04
+    bcgG: 0.05, overdraft: 0.12, odPremium: 0.04,
+    disRecov: 0.75, disFloor: 0.50, maxDisinv: 0.50,
+    floorBase: 0.4, floorSlope: 4, groupX: 0.25
   };
+
+  /* Désinvestissement : actifs cédés avec décote, plus forte quand le créneau est en
+     surcapacité (personne n'a besoin de ces capacités). Plafonné par exercice : sortir
+     d'un créneau d'un coup passe par la vente ou la fermeture de la division. */
+  function disinvestRate(G, seg) {
+    const p = G.params;
+    return clamp(p.disRecov - 0.8 * Math.max(0, (seg.r || 1) - 1), p.disFloor, p.disRecov);
+  }
 
   /* ---------- Économie d'un créneau ---------- */
   function effX(G, co, seg) {
@@ -206,7 +221,7 @@ var ENGINE = (function () {
     for (const sid in co.div) {
       if (sid === seg.id) continue;
       const s2 = segById(G, sid);
-      if (s2.group === seg.group) x += 0.25 * co.div[sid].X / s2.Xnorm;
+      if (s2.group === seg.group) x += G.params.groupX * co.div[sid].X / s2.Xnorm;
     }
     return Math.max(0.05, x);
   }
@@ -230,10 +245,17 @@ var ENGINE = (function () {
     const r = seg.D > 0 ? S / seg.D : 1;
     const f = clamp(Math.pow(Math.max(r, 0.01), -seg.eps), 0.5, 1.45);
     const P = (avgC + seg.dep * seg.capex) * (1 + seg.mu) * f;
+    // Régulation tarifaire : une société en position dominante ne peut pas facturer la
+    // prime de pénurie ; elle vend au prix d'équilibre. Sans cela, le plafonnement de ses
+    // investissements lui garantirait une rente de rareté.
+    const Preg = G.params.priceCap === false ? P : Math.min(P, P / f);
     players.forEach(co => {
       const d = co.div[seg.id];
       d.share = qT > 0 ? d.q / qT : 0;
-      d.rev = P * d.q;
+    });
+    players.forEach(co => {
+      const d = co.div[seg.id];
+      d.rev = (d.share >= G.params.cap ? Preg : P) * d.q;
       d.opex = d.c * d.q;
       d.ebit = d.rev - d.opex - d.depT;
     });
@@ -247,13 +269,21 @@ var ENGINE = (function () {
     seg.hist.push({ t, D: seg.D, g: seg.g, P, r, u, S, n: players.length });
   }
 
-  function segPER(seg) {
+  function segTrend(seg) {
     const h = seg.hist;
     const n = Math.min(3, h.length);
     let g = 0;
     for (let i = h.length - n; i < h.length; i++) g += h[i].g;
-    g = n ? g / n : 0;
-    return clamp(11 + 280 * g, 10, 45) + (seg.perBonus || 0);
+    return n ? g / n : 0;
+  }
+  function segPER(seg) {
+    return clamp(11 + 280 * segTrend(seg), 10, 45) + (seg.perBonus || 0);
+  }
+  /* Valeur plancher d'une division, en fraction de ses actifs : le marché paie des
+     capacités installées dans un créneau qui croît, beaucoup moins dans un créneau qui décline. */
+  function assetFloor(G, seg) {
+    const p = G.params;
+    return clamp(p.floorBase + p.floorSlope * segTrend(seg), p.floorBase, 1.0);
   }
 
   function forecastGrowth(G, seg, t) {
@@ -276,17 +306,26 @@ var ENGINE = (function () {
   function loanTotal(P, rate, n) { return P + rate * P * (n + 1) / 2; }
 
   /* ---------- Valorisation ---------- */
-  function valuation(G, co, npRec) {
-    let rev = 0, w = 0, assets = 0;
+  /* Somme des parties : chaque division vaut PER du créneau × résultat opérationnel
+     normatif après impôt, sans descendre sous sa valeur plancher ; on ajoute la trésorerie et on
+     retranche la dette. Un euro en caisse vaut donc un euro, et un investissement de
+     conquête qui pèse sur les résultats n'est pas sanctionné au-delà de la décote des actifs. */
+  function valuation(G, co) {
+    const tax = G.params.tax;
+    let rev = 0, w = 0, assets = 0, ev = 0;
     for (const sid in co.div) {
-      const d = co.div[sid], seg = segById(G, sid);
-      rev += d.rev || 0; w += (d.rev || 0) * segPER(seg); assets += d.A;
+      const d = co.div[sid], seg = segById(G, sid), per = segPER(seg);
+      rev += d.rev || 0; w += (d.rev || 0) * per; assets += d.A;
+      // résultat normatif : moyenne des deux derniers exercices, pour lisser les à-coups
+      const hh = d.hist || [], prev = hh.length >= 2 ? hh[hh.length - 2].ebit : d.ebit;
+      const ebitN = 0.5 * ((d.ebit || 0) + (prev || 0));
+      ev += Math.max(per * ebitN * (1 - tax), assetFloor(G, seg) * d.A);
     }
     const PER = rev > 0 ? w / rev : 10;
     const debt = co.loan ? co.loan.out : 0;
     const equity = assets + co.cash - debt;
-    const value = Math.max(PER * npRec, 0.5 * Math.max(0, equity));
-    return { PER, equity, value, assets, debt };
+    const value = Math.max(ev + co.cash - debt, 0.25 * Math.max(0, equity));
+    return { PER, equity, value, assets, debt, ev };
   }
 
   /* ---------- Création d'une partie ---------- */
@@ -295,7 +334,7 @@ var ENGINE = (function () {
     const sc = scenarioById(scId);
     const seed = (opts.seed >>> 0) || ((Date.now() ^ 0x5bd1e995) >>> 0);
     const G = {
-      v: 1, sc: sc.id, title: sc.title, seed, rng: seed | 0,
+      v: VERSION, sc: sc.id, title: sc.title, seed, rng: seed | 0, rngAI: (seed ^ 0x9E3779B9) | 0,
       year: 0, T: opts.years || 15, startYear: sc.startYear || 2027,
       params: Object.assign({}, DEFAULT_PARAMS, sc.params || {}),
       segments: [], companies: [], listings: [], log: [], news: [],
@@ -355,7 +394,7 @@ var ENGINE = (function () {
       const ebt = ebit - interest + intInc;
       const tax = Math.max(0, ebt) * G.params.tax;
       const npRec = ebt - tax;
-      const val = valuation(G, co, npRec);
+      const val = valuation(G, co);
       co.shares = Math.max(1, val.value / 10);
       co.hist.push({
         t: 0, rev, ebit, dep, interest, intInc, tax, npRec, exc: 0, np: npRec, dividends: 0, inv: dep,
@@ -412,9 +451,6 @@ var ENGINE = (function () {
       applyEvent(G, ev);
       G.news.push({ t, kind: ev.kind, text: ev.text });
     }
-    if (G.params.rate !== G.params.rate0 && !G.news.some(n => n.kind === "banque")) {
-      // rien : le taux courant est affiché dans le panneau de financement
-    }
     G.news.forEach(n => G.log.push(n));
   }
 
@@ -466,7 +502,7 @@ var ENGINE = (function () {
       const gF = forecastGrowth(G, seg, t);
       const interest = own ? 1 : ((gF > 0.04 && P.entry > 0) ? 0.6 : (P.bidBoost ? 0.4 : 0));
       if (!interest) return;
-      const val = ld.A * (0.45 + 0.25 * interest + clamp(gF * 3, -0.15, 0.3) + (P.bidBoost || 0)) * (0.9 + 0.2 * rnd(G));
+      const val = ld.A * (0.45 + 0.25 * interest + clamp(gF * 3, -0.15, 0.3) + (P.bidBoost || 0)) * (0.9 + 0.2 * rnd(G, "rngAI"));
       const amt = Math.min(val, Math.max(0, co.cash - safety) * 0.6);
       if (amt > 0 && amt >= L.minPrice) { dec.bids[L.id] = Math.round(amt); free -= amt; }
     });
@@ -480,7 +516,7 @@ var ENGINE = (function () {
       if (G.listings.some(l => l.seller === co.id && l.seg === sid)) continue;
       const gF = 0.5 * seg.g + 0.5 * forecastGrowth(G, seg, t);
       if (d.lossYears >= P.exitPatience && d.rs < 0.7 && gF < 0.06 && t - d.entered > 4) {
-        if (d.unsold >= 1) dec.disinvest[sid] = Math.round(d.A);
+        if (d.unsold >= 1) dec.divest[sid] = { mode: "liq" };
         else dec.divest[sid] = { mode: "auction", min: Math.round(0.45 * d.A) };
         continue;
       }
@@ -504,7 +540,7 @@ var ENGINE = (function () {
       wants.push({ sid, inv: maint, pr: 3 });
       if (inv > maint) wants.push({ sid, inv: inv - maint, pr: d.rs >= 1 ? 2 : 1 });
     }
-    if (P.entry > 0 && t >= 2 && rnd(G) < P.entry) {
+    if (P.entry > 0 && t >= 2 && rnd(G, "rngAI") < P.entry) {
       const cands = G.segments.filter(s => !co.div[s.id] && forecastGrowth(G, s, t) > 0.05);
       if (cands.length) {
         cands.sort((a, b) => forecastGrowth(G, b, t) - forecastGrowth(G, a, t));
@@ -557,7 +593,7 @@ var ENGINE = (function () {
     for (const sid in (dec.disinvest || {})) {
       const v = +dec.disinvest[sid];
       if (!co.div[sid] || !isFinite(v) || v <= 0 || out.divest[sid] || G.listings.some(l => l.seller === co.id && l.seg === sid)) continue;
-      out.disinvest[sid] = Math.min(v, co.div[sid].A);
+      out.disinvest[sid] = Math.min(v, G.params.maxDisinv * co.div[sid].A);
       delete out.invest[sid];
     }
     if (dec.loan && +dec.loan.amount > 0) out.loan = { amount: +dec.loan.amount, years: clamp(Math.round(+dec.loan.years || 5), 2, G.params.maxLoanYears) };
@@ -683,18 +719,17 @@ var ENGINE = (function () {
           G.log.push({ t, kind: "entrée", text: co.name + " entre sur « " + seg.name + " » avec " + fmt(amount) + " M€ d'investissement." });
         }
         if (!d) return;
-        const dis = Math.min(d.A, Math.max(0, +((dc.disinvest || {})[seg.id] || 0)));
+        const disReq = Math.max(0, +((dc.disinvest || {})[seg.id] || 0));
+        const dis = Math.min(p.maxDisinv * d.A, disReq);
         if (dis > 0 && !G.listings.some(l => l.seller === co.id && l.seg === seg.id)) {
-          co.cash += dis; co._disinv += dis; amount = 0;
-          if (dis >= d.A - 0.5) {
-            co._sold[seg.id] = true;
-            delete co.div[seg.id];
-            G.log.push({ t, kind: "désinvestissement", text: co.name + " cède la totalité des actifs de « " + seg.name + " » (" + fmt(dis) + " M€) et quitte le créneau." });
-            if (co.player) R.notes.push("« " + seg.name + " » : actifs entièrement cédés pour " + fmt(dis) + " M€ ; vous quittez le créneau.");
-            return;
-          }
+          const got = disinvestRate(G, seg) * dis;
+          co.cash += got; co._disinv += got; co._exc -= dis - got; amount = 0;
           d.A -= dis;
-          G.log.push({ t, kind: "désinvestissement", text: co.name + " désinvestit " + fmt(dis) + " M€ d'actifs dans « " + seg.name + " »." });
+          G.log.push({ t, kind: "désinvestissement", text: co.name + " désinvestit " + fmt(dis) + " M€ d'actifs dans « " + seg.name + " » et en récupère " + fmt(got) + " M€." });
+          if (co.player) {
+            if (disReq > dis + 0.5) R.notes.push("« " + seg.name + " » : désinvestissement plafonné à " + pct(p.maxDisinv, 0) + " des actifs, soit " + fmt(dis) + " M€.");
+            R.notes.push("« " + seg.name + " » : " + fmt(dis) + " M€ d'actifs cédés pour " + fmt(got) + " M€, moins-value de " + fmt(dis - got) + " M€.");
+          }
         }
         const maint = seg.dep * d.A;
         if (co.player && amount > 0) G.pinv.push({ t, sid: seg.id, inv: amount, quad: quadrant(G, seg, d.share > 0 ? d.rs : 0, true), entry: d.entered === t });
@@ -750,11 +785,11 @@ var ENGINE = (function () {
         co.cash += co.pendingLoan.P0; co.loan = co.pendingLoan; co.pendingLoan = null;
         G.log.push({ t, kind: "banque", text: co.name + " obtient un emprunt de " + fmt(co.loan.P0) + " M€ sur " + co.loan.years + " ans à " + pct(co.loan.rate, 2) + "." });
       }
-      const val = valuation(G, co, npRec);
+      const val = valuation(G, co);
       let price = val.value / co.shares;
       const dps = dividends / co.shares;
       co.dps.push(dps);
-      let score = price + sum(co.dps) / co.dps.length;
+      let score = price + sum(co.dps);
       co.overdraft = p.overdraft * Math.max(rev, 0.5 * co.hist[0].rev);
       if (co.cash < -co.overdraft) {
         co.alive = false; co.bankrupt = t; price = 0; score = 0;
@@ -811,8 +846,8 @@ var ENGINE = (function () {
   }
 
   return {
-    SCENARIOS, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
-    forecastGrowth, quadrant, segPER, segById, coById, lastH, valuation, pathGrowth, unitCost, fmt, pct, clamp, sum, sanitize
+    VERSION, SCENARIOS, disinvestRate, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
+    forecastGrowth, quadrant, segPER, assetFloor, segById, coById, lastH, valuation, pathGrowth, unitCost, fmt, pct, clamp, sum, sanitize
   };
 })();
 if (typeof module !== "undefined") module.exports = ENGINE;
