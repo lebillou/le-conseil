@@ -3,10 +3,13 @@
   const E = ENGINE;
   const fmt = E.fmt, pct = E.pct, clamp = E.clamp;
   const app = document.getElementById("app");
-  const SAVE_KEY = "leconseil.partie.v1";
+  const SAVE_KEY = "leconseil.partie.v2";
   const SHORT = { emb: "Emballages", mac: "Machines-outils", cmp: "Composants", bat: "Batteries", pmt: "Pièces thermiques", cap: "Capteurs", med: "Médical",
     gvfr: "GV France", gvde: "GV Allemagne", gves: "GV Espagne", gvit: "GV Italie", icfr: "IC France", icde: "IC Allemagne", icsud: "IC Sud", car: "Autocars",
-    mfr: "Meubles FR", mde: "Meubles DACH", msud: "Meubles Sud", muk: "Meubles UK", co2: "Centrales CO₂", hfc: "Vitrines HFC", srv: "Services", chf: "Chambres froides" };
+    mfr: "Meubles FR", mde: "Meubles DACH", msud: "Meubles Sud", muk: "Meubles UK", co2: "Centrales CO₂", hfc: "Vitrines HFC", srv: "Services", chf: "Chambres froides",
+    cth: "Citadines therm.", sth: "SUV therm.", utl: "Utilitaires", cve: "Compactes VE", sve: "SUV VE", btr: "Batteries", apv: "Après-vente", logi: "Logiciel",
+    itg: "Intégration", hw: "Serveurs", cld: "Cloud", csv: "Cloud souverain", saas: "SaaS", cyb: "Cybersécurité", puce: "Puces IA",
+    cvx: "Cardiologie", gen: "Génériques", otc: "Grand public", vac: "Vaccins", onco: "Oncologie", bios: "Biosimilaires", thg: "Thérapies géniques" };
   const QUAD = { vedette: "Vedette", vache: "Vache à lait", dilemme: "Dilemme", poids: "Poids mort" };
   const TABS = [
     ["conseil", "Séance du conseil"], ["divisions", "Divisions"], ["marches", "Marchés"], ["matrice", "Matrice BCG"],
@@ -43,10 +46,14 @@
 
   /* ---------------- sauvegarde ---------------- */
   function save() {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ G: S.G, draft: S.draft, q: S.q, sel: S.sel })); } catch (e) { /* stockage indisponible */ }
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ G: S.G, draft: S.draft, q: S.q, sel: S.sel, deadline: S.deadline })); } catch (e) { /* stockage indisponible */ }
   }
   function loadSaved() {
-    try { const s = localStorage.getItem(SAVE_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; }
+    try {
+      const s = localStorage.getItem(SAVE_KEY);
+      const sv = s ? JSON.parse(s) : null;
+      return sv && sv.G && sv.G.v === E.VERSION ? sv : null;
+    } catch (e) { return null; }
   }
   function clearSaved() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* rien */ } }
 
@@ -61,6 +68,10 @@
     return d;
   }
 
+  // montant d'actifs effectivement cédés et trésorerie récupérée pour une demande donnée
+  function disAssets(co, sid, v) { return Math.min(Math.max(0, v), S.G.params.maxDisinv * co.div[sid].A); }
+  function disCash(co, sid, v) { return E.disinvestRate(S.G, segOf(sid)) * disAssets(co, sid, v); }
+
   function hasListing(co, sid) { return S.G.listings.some(l => l.seller === co.id && l.seg === sid); }
 
   function estimate() {
@@ -73,7 +84,7 @@
     }
     for (const lid in d.bids) bids += +d.bids[lid] || 0;
     let dis = 0;
-    for (const sid in (d.disinvest || {})) if (co.div[sid]) dis += Math.min(+d.disinvest[sid] || 0, co.div[sid].A);
+    for (const sid in (d.disinvest || {})) if (co.div[sid]) dis += disCash(co, sid, +d.disinvest[sid] || 0);
     const issue = d.issuePct > 0 ? co.shares * d.issuePct * h.price * (1 - p.issueDisc) : 0;
     const buy = d.buybackPct > 0 ? co.shares * d.buybackPct * h.price * 1.05 : 0;
     const divEst = d.payout * Math.max(0, h.npRec);
@@ -83,18 +94,29 @@
     const loanIn = d.loan ? Math.min(+d.loan.amount || 0, ml) : 0;
     const end = cash + loanIn;
     const limit = p.overdraft * Math.max(h.rev, 0.5 * co.hist[0].rev);
-    const lvl = end < -limit ? "bad" : end < 0 ? "warn" : "good";
-    return { inv, dis, end, limit, lvl, divEst, issue, buy, loanIn, ml };
+    // l'aperçu simule l'exercice ; à défaut, estimation comptable sur le résultat de l'an dernier
+    const pv = runPreview();
+    const endP = pv ? pv.h.cash : end;
+    const lvl = pv ? (!pv.co.alive ? "bad" : endP < 0 ? "warn" : "good") : (end < -limit ? "bad" : end < 0 ? "warn" : "good");
+    return { inv, dis, end: endP, limit, lvl, divEst, issue, buy, loanIn, ml, pv };
+  }
+  function runPreview() {
+    try {
+      const dec = JSON.parse(JSON.stringify(S.draft));
+      if (dec.loan && !(dec.loan.amount > 0)) dec.loan = null;
+      return E.preview(S.G, dec);
+    } catch (e) { return null; }
   }
 
   /* ---------------- graphiques SVG ---------------- */
   function niceTicks(min, max, n) {
     if (!isFinite(min) || !isFinite(max)) return [0, 1];
-    if (min === max) { max = min + 1; min = min - 1; }
+    // écart nul ou réduit à un arrondi flottant : élargir, sinon le pas passe sous la précision
+    if (max - min < 1e-9 * Math.max(1, Math.abs(max))) { max = max + 1; min = min - 1; }
     const span = max - min, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
     const step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(s => span / s <= n) || 10 * mag;
     const t = [];
-    for (let v = Math.floor(min / step) * step; v <= max + step * 0.001; v += step) t.push(+v.toFixed(10));
+    for (let v = Math.floor(min / step) * step, i = 0; v <= max + step * 0.001 && i < 50; v += step, i++) t.push(+v.toFixed(10));
     if (t[t.length - 1] < max) t.push(t[t.length - 1] + step);
     return t;
   }
@@ -141,16 +163,16 @@
     const items = [];
     for (const sid in co.div) {
       const d = co.div[sid], seg = segOf(sid);
-      items.push({ seg, d, rs: clamp(d.share > 0 ? d.rs : 0.1, 0.1, 10), g: seg.g, rev: d.rev || 0 });
+      items.push({ seg, d, rs: clamp(d.share > 0 ? d.rs : 0.1, 0.1, 10), g: E.forecastGrowth(G, seg, G.year + 1), rev: d.rev || 0 });
     }
-    const gs = G.segments.map(s => s.g).concat([G.params.bcgG]);
+    const gs = G.segments.map(s => E.forecastGrowth(G, s, G.year + 1)).concat([G.params.bcgG]);
     let gmin = Math.min(-0.05, ...gs) - 0.02, gmax = Math.max(0.15, ...gs) + 0.02;
     const yt = niceTicks(gmin * 100, gmax * 100, 6);
     gmin = yt[0] / 100; gmax = yt[yt.length - 1] / 100;
     const lx = v => Math.log10(v);
     const X = rs => ml + (1 - (lx(rs) + 1) / 2) * (W - ml - mr);
     const Y = g => mt + (1 - (g - gmin) / (gmax - gmin)) * (H - mt - mb);
-    const maxRev = Math.max(1, ...G.companies.flatMap(c => Object.values(c.div).map(d => d.rev || 0)));
+    const maxRev = Math.max(1, ...G.companies.filter(c => c.alive).flatMap(c => Object.values(c.div).map(d => d.rev || 0)));
     let s = "";
     s += `<rect x="${ml}" y="${mt}" width="${X(1) - ml}" height="${Y(G.params.bcgG) - mt}" fill="var(--good)" opacity="0.06"/>`;
     s += `<rect x="${X(1)}" y="${Y(G.params.bcgG)}" width="${W - mr - X(1)}" height="${H - mb - Y(G.params.bcgG)}" fill="var(--bad)" opacity="0.06"/>`;
@@ -246,7 +268,7 @@
         <span class="eyebrow">${esc(s.kicker)}</span>
         <h3>${esc(s.title)}</h3>
         <p class="small">${esc(s.pitch)}</p>
-        <span class="chips"><span class="chip">${s.segments.length} créneaux</span><span class="chip">4 concurrents</span><span class="chip">Seuil antitrust ${pct(s.params.cap, 0)}</span></span>
+        <span class="chips">${s.difficulty ? `<span class="chip on">${esc(s.difficulty)}</span>` : ""}<span class="chip">${s.segments.length} créneaux</span><span class="chip">4 concurrents</span><span class="chip">Seuil antitrust ${pct(s.params.cap, 0)}</span></span>
       </button>`).join("")}</div>
   </section>
   <section class="section">
@@ -284,7 +306,7 @@
     <span>Dette<b>${M(co.loan ? co.loan.out : 0)}</b></span><span>Taux directeur<b>${pct(G.params.rate, 1)}</b></span><span>Rang<b>${rankOf(co)}/${G.companies.length}</b></span>
     ${S.sel.timer && !over ? `<span>Temps<b class="timer" id="timer">—</b></span>` : ""}
   </div>
-  <nav class="tabs" role="tablist" aria-label="Rubriques">${tabs.map(([id, l]) => `<button class="tab" role="tab" id="tab-${id}" aria-selected="${S.tab === id}" data-act="tab" data-tab="${id}">${l}</button>`).join("")}</nav>
+  <nav class="tabs" role="tablist" aria-label="Rubriques">${tabs.map(([id, l]) => `<button class="tab" role="tab" id="tab-${id}" aria-selected="${S.tab === id}" aria-controls="panel" tabindex="${S.tab === id ? 0 : -1}" data-act="tab" data-tab="${id}">${l}</button>`).join("")}</nav>
 </div></div>
 <main class="wrap" id="panel" role="tabpanel" aria-labelledby="tab-${S.tab}">${renderTab()}</main>
 ${over ? `<div class="footer-bar"><div class="wrap"><div class="sum"><span>Partie terminée. Score final <b>${fmt(h.score, 2)}</b>.</span></div><div class="row"><button class="btn ghost" data-act="replay">Rejouer cette graine</button><button class="btn primary" data-act="new">Nouvelle partie</button></div></div></div>`
@@ -357,6 +379,7 @@ ${S.result ? renderSheet() : ""}`;
     const dis = (dr.disinvest || {})[sid] || 0;
     const canDis = !listed && !dv.mode;
     const dq = (f, label) => `<button type="button" data-act="dq" data-sid="${sid}" data-f="${f}">${label} <span class="num">${fmt(f * d.A)}</span></button>`;
+    const dRate = E.disinvestRate(G, seg);
     const dominant = d.share >= p.cap;
     const qb = (k, label, v) => `<button type="button" class="${S.q[sid] === k ? "on" : ""}" data-act="q" data-sid="${sid}" data-k="${k}" data-v="${v}">${label} <span class="num">${fmt(v)}</span></button>`;
     return `
@@ -375,8 +398,9 @@ ${S.result ? renderSheet() : ""}`;
   <div class="inv">
     <div class="inv-line"><label for="inv-${sid}">Investissement de l'exercice</label><input id="inv-${sid}" type="number" min="0" step="1" inputmode="decimal" data-k="inv" data-sid="${sid}" value="${Math.round(cur)}" ${dv.mode === "liq" || dis > 0 ? "disabled" : ""}></div>
     <div class="quick">${qb("zero", "Rien", 0)}${qb("maint", "Maintien", hint.maint)}${qb("follow", "Suivre le marché", hint.follow)}${qb("plus5", "+5 pts de part", hint.plus5)}</div>
-    ${canDis ? `<div class="inv-line"><label for="dis-${sid}">Désinvestir (actifs cédés, M€)</label><input id="dis-${sid}" type="number" min="0" max="${Math.floor(d.A)}" step="1" inputmode="decimal" data-k="dis" data-sid="${sid}" value="${Math.round(dis)}"></div>
-    <div class="quick">${dq(0.25, "25 %")}${dq(0.5, "50 %")}${dq(1, "Tout")}${dis > 0 ? `<button type="button" data-act="dq" data-sid="${sid}" data-f="0">Annuler</button>` : ""}</div>` : ""}
+    ${canDis ? `<div class="inv-line"><label for="dis-${sid}">Désinvestir (actifs cédés, M€)</label><input id="dis-${sid}" type="number" min="0" max="${Math.floor(p.maxDisinv * d.A)}" step="1" inputmode="decimal" data-k="dis" data-sid="${sid}" value="${Math.round(dis)}"></div>
+    <div class="quick">${dq(0.25, "25 %")}${dq(p.maxDisinv, "Maximum " + pct(p.maxDisinv, 0))}${dis > 0 ? `<button type="button" data-act="dq" data-sid="${sid}" data-f="0">Annuler</button>` : ""}</div>
+    <p class="small muted">Actifs repris à ${pct(dRate, 0)} de leur valeur${dRate < p.disRecov ? " (décote aggravée par la surcapacité du créneau)" : ""}.</p>` : ""}
     <p class="effect" id="eff-${sid}"></p>
   </div>
   ${listed ? "" : `<div class="dv">
@@ -408,7 +432,7 @@ ${S.result ? renderSheet() : ""}`;
     return `<div class="panel">
   <div class="slider-head"><label for="payout"><b>Dividende</b></label><b id="payout-v">${pct(d.payout, 0)}</b></div>
   <input id="payout" type="range" min="0" max="100" step="5" value="${Math.round(d.payout * 100)}" data-k="payout">
-  <p class="small muted">Part du résultat net courant de l'exercice versée aux actionnaires. Le dividende moyen par action entre dans le score ; ce qui n'est pas distribué finance la croissance.</p>
+  <p class="small muted">Part du résultat net courant de l'exercice versée aux actionnaires. Les dividendes cumulés entrent dans le score à hauteur de ce qu'ils retirent de la trésorerie : distribuer n'est payant que si l'argent ne trouve pas de meilleur emploi.</p>
   <div class="kv"><span>Dividende indicatif (sur RN ${yearOf(S.G.year)})</span><span class="num" id="payout-amt"></span></div>
 </div>`;
   }
@@ -445,13 +469,13 @@ ${S.result ? renderSheet() : ""}`;
   <div class="slider-head"><label for="buyback">Rachat d'actions</label><b id="buyback-v">${pct(d.buybackPct, 0)}</b></div>
   <input id="buyback" type="range" min="0" max="${Math.round(p.maxBuyback * 100)}" step="1" value="${Math.round(d.buybackPct * 100)}" data-k="buyback">
   <div class="kv"><span>Coût (prime de 5 %)</span><span class="num" id="buyback-amt"></span></div>
-  <p class="small muted">L'émission apporte du cash immédiatement mais dilue le cours. Le rachat n'a de sens que si la trésorerie excède durablement les besoins d'investissement. Cours de référence : ${EUR(h.price)} · ${fmt(co.shares, 1)} M d'actions.</p></div>`;
+  <p class="small muted">L'émission apporte du cash immédiatement mais dilue le cours (décote). Le rachat coûte une prime : il ne crée pas de valeur, il rend de la trésorerie sans utilité. Cours de référence : ${EUR(h.price)} · ${fmt(co.shares, 1)} M d'actions.</p></div>`;
   }
 
   function listingsBlock(co) {
     const G = S.G, p = G.params;
     const mine = G.listings.filter(l => l.seller === co.id);
-    const theirs = G.listings.filter(l => l.seller !== co.id && E.coById(G, l.seller).alive && E.coById(G, l.seller).div[l.seg]);
+    const theirs = G.listings.filter(l => l.seller !== co.id && (E.coById(G, l.seller).alive || l.liq) && E.coById(G, l.seller).div[l.seg]);
     let html = "";
     mine.forEach(l => { html += `<div class="news-item"><div class="eyebrow">Votre cession</div><p>« ${esc(segOf(l.seg).name)} » est en vente avec un prix minimal de ${M(l.minPrice)}. Résultat à la clôture.</p></div>`; });
     if (!theirs.length) html += `<p class="muted small">Aucune division concurrente n'est à vendre actuellement.</p>`;
@@ -461,7 +485,7 @@ ${S.result ? renderSheet() : ""}`;
       const comb = (own ? own.share : 0) + d.share;
       const blocked = comb > p.cap;
       const margin = d.rev > 0 ? d.ebit / d.rev : 0;
-      return `<article class="seg-card"><header><h3>${esc(seg.name)}</h3><span class="chip">${esc(seller.name)}</span></header>
+      return `<article class="seg-card"><header><h3>${esc(seg.name)}</h3><span class="chip">${l.liq ? "Liquidation · " : ""}${esc(seller.name)}</span></header>
         <dl class="facts"><div><dt>Part</dt><dd>${pct(d.share)}</dd></div><div><dt>Marge op.</dt><dd class="${margin < 0 ? "bad" : ""}">${pct(margin)}</dd></div><div><dt>Actifs</dt><dd>${M(d.A)}</dd></div>
         <div><dt>Prix minimal</dt><dd>${M(l.minPrice)}</dd></div><div><dt>Croissance</dt><dd>${pct(seg.g)}</dd></div><div><dt>Part cumulée</dt><dd class="${blocked ? "bad" : ""}">${pct(comb)}</dd></div></dl>
         ${blocked ? `<p class="small bad">Rachat interdit : la part cumulée dépasserait le seuil de ${pct(p.cap, 0)}.</p>` : `<div class="inv-line"><label for="bid-${l.id}">Votre offre (M€)</label><input id="bid-${l.id}" type="number" min="0" step="1" inputmode="decimal" data-k="bid" data-lid="${l.id}" value="${Math.round(S.draft.bids[l.id] || 0)}"></div>
@@ -481,16 +505,18 @@ ${S.result ? renderSheet() : ""}`;
   function updateDerived() {
     const G = S.G, co = player(), h = lastH(co), d = S.draft, p = G.params;
     if (!d) return;
+    const est = estimate();
     // effets par division
     for (const sid in co.div) {
       const dv = co.div[sid], seg = segOf(sid);
-      const dis = Math.min(dv.A, +((d.disinvest || {})[sid]) || 0);
+      const dis = disAssets(co, sid, +((d.disinvest || {})[sid]) || 0);
       const inv = dis > 0 ? 0 : (+d.invest[sid] || 0);
       const K1 = ((dv.A - dis) * (1 - seg.dep) + inv) / seg.capex;
-      if (dis >= dv.A - 0.5) { setText("eff-" + sid, `Cession totale : ${M(dis)} récupérés, vous quittez le créneau.`); continue; }
       const share = K1 / Math.max(1e-9, seg.S - dv.K + K1);
       const c = E.unitCost(G, co, seg);
-      setText("eff-" + sid, (dis > 0 ? `Trésorerie récupérée ${M(dis)} · ` : "") + `Capacité ${fmt(dv.K)} → ${fmt(K1)} (${sign(K1 / Math.max(1e-9, dv.K) - 1, x => pct(x, 0))}) · part potentielle ≈ ${pct(share, 0)} · coût unitaire ${fmt(c, 3)} pour un prix de ${fmt(seg.P, 3)}`);
+      const pd = est.pv && est.pv.co.div[sid];
+      const outlook = pd && pd.rev > 0 ? `aperçu : part ${pct(pd.share, 0)}, marge ${pct(pd.ebit / pd.rev, 0)}` : `part potentielle ≈ ${pct(share, 0)}`;
+      setText("eff-" + sid, (dis > 0 ? `Trésorerie récupérée ${M(disCash(co, sid, dis))} (moins-value ${M(dis - disCash(co, sid, dis))}) · ` : "") + `Capacité ${fmt(dv.K)} → ${fmt(K1)} (${sign(K1 / Math.max(1e-9, dv.K) - 1, x => pct(x, 0))}) · ${outlook} · coût unitaire ${fmt(c, 3)} pour un prix de ${fmt(seg.P, 3)}`);
     }
     setText("payout-v", pct(d.payout, 0));
     setText("payout-amt", M(d.payout * Math.max(0, h.npRec)));
@@ -504,13 +530,12 @@ ${S.result ? renderSheet() : ""}`;
         setText("loan-tot", M(E.loanTotal(amt, r, yrs)) + " sur " + yrs + " ans");
       } else { setText("loan-rate", pct(E.loanRate(G, co, Math.max(1, ml * 0.5)), 2) + " (indicatif)"); setText("loan-tot", "—"); }
     }
-    const est = estimate();
     setText("issue-v", pct(d.issuePct, 0)); setText("issue-amt", M(est.issue));
     setText("buyback-v", pct(d.buybackPct, 0)); setText("buyback-amt", M(est.buy));
     const sum = document.getElementById("sum");
     if (sum) {
       const msg = est.lvl === "bad" ? "Risque de cessation de paiements" : est.lvl === "warn" ? "Découvert utilisé" : "Trésorerie positive";
-      sum.innerHTML = `<span>Investissements <b>${M(est.inv)}</b></span>${est.dis > 0 ? `<span>Désinvestissements <b>${M(est.dis)}</b></span>` : ""}<span><i class="sig ${est.lvl === "good" ? "" : est.lvl}"></i>Trésorerie fin ${yearOf(G.year + 1)} estimée <b class="${est.lvl === "good" ? "" : est.lvl}">${M(est.end)}</b></span><span class="muted">${msg} · découvert autorisé ${M(est.limit)}</span>`;
+      sum.innerHTML = `<span>Investissements <b>${M(est.inv)}</b></span>${est.dis > 0 ? `<span>Désinvestissements <b>${M(est.dis)}</b></span>` : ""}<span><i class="sig ${est.lvl === "good" ? "" : est.lvl}"></i>Trésorerie fin ${yearOf(G.year + 1)} estimée <b class="${est.lvl === "good" ? "" : est.lvl}">${M(est.end)}</b></span>${est.pv && est.pv.co.alive ? `<span title="Aperçu : conjoncture sans aléa, concurrents qui investissent au rythme de leur marché">Cours estimé <b>${EUR(est.pv.h.price)}</b></span>` : ""}<span class="muted">${msg} · découvert autorisé ${M(est.limit)} · aperçu sans aléa, concurrents au rythme du marché</span>`;
     }
     const btn = document.getElementById("validate");
     if (btn) btn.textContent = S.confirmRisk ? "Confirmer malgré le risque" : "Valider l'exercice " + yearOf(G.year + 1);
@@ -565,13 +590,13 @@ ${S.result ? renderSheet() : ""}`;
     if (!co || !co.alive) { co = player(); S.matrixCo = co.id; }
     const rows = Object.keys(co.div).map(sid => {
       const d = co.div[sid], seg = segOf(sid);
-      return `<tr><td><i class="dot" style="background:${co.color}"></i>${esc(seg.name)}</td><td>${fmt(d.rs, 2)}×</td><td>${pct(seg.g)}</td><td>${M(d.rev)}</td><td>${QUAD[E.quadrant(G, seg, d.rs, false)]}</td></tr>`;
+      return `<tr><td><i class="dot" style="background:${co.color}"></i>${esc(seg.name)}</td><td>${fmt(d.rs, 2)}×</td><td>${pct(E.forecastGrowth(G, seg, G.year + 1))}</td><td>${M(d.rev)}</td><td>${QUAD[quadOf(co, sid)]}</td></tr>`;
     }).join("");
     return `<section class="section"><div class="section-head"><h2>Matrice part de marché / croissance</h2><span class="muted small">Exercice ${yearOf(G.year)} · taille des bulles proportionnelle au CA</span></div>
 <div class="co-pick" role="group" aria-label="Société affichée">${G.companies.filter(c => c.alive).map(c => `<button data-act="mco" data-id="${c.id}" aria-pressed="${c.id === co.id}"><i class="dot" style="background:${c.color}"></i>${esc(c.name)}</button>`).join("")}</div>
 <div class="matrix-panel">${bcgChart(co)}</div>
-<div class="tbl-wrap"><table><thead><tr><th>Division</th><th>Part relative</th><th>Croissance</th><th>CA</th><th>Position</th></tr></thead><tbody>${rows}</tbody></table></div>
-<p class="small muted">Seuil de croissance : ${pct(G.params.bcgG, 0)}. Les vedettes demandent du cash pour suivre le marché ; les vaches à lait en dégagent ; les dilemmes exigent un choix entre investir massivement ou sortir ; les poids morts consomment des ressources sans perspective.</p></section>`;
+<div class="tbl-wrap"><table><thead><tr><th>Division</th><th>Part relative</th><th>Croissance prévue</th><th>CA</th><th>Position</th></tr></thead><tbody>${rows}</tbody></table></div>
+<p class="small muted">Ordonnée : croissance prévue pour le prochain exercice ; seuil ${pct(G.params.bcgG, 0)}. Les vedettes demandent du cash pour suivre le marché ; les vaches à lait en dégagent ; les dilemmes exigent un choix entre investir massivement ou sortir ; les poids morts consomment des ressources sans perspective.</p></section>`;
   }
 
   /* ---------------- Comptes ---------------- */
@@ -603,12 +628,12 @@ ${S.result ? renderSheet() : ""}`;
     const list = G.companies.slice().sort((a, b) => lastH(b).score - lastH(a).score);
     const rows = list.map((c, i) => {
       const h = lastH(c), m = h.rev ? h.ebit / h.rev : 0, de = h.equity > 0 ? h.debt / h.equity : 0;
-      return `<tr class="${c.player ? "me" : ""} ${c.alive ? "" : "dead"}"><td>${i + 1}. <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</td><td>${fmt(h.score, 2)}</td><td>${EUR(h.price)}</td><td>${EUR(E.sum(c.dps) / Math.max(1, c.dps.length))}</td>
-      <td>${M(h.rev)}</td><td class="${h.npRec < 0 ? "bad" : ""}">${M(h.npRec)}</td><td>${pct(m)}</td><td>${M(h.cash)}</td><td>${fmt(de, 2)}</td><td>${Object.keys(c.div).length}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
+      return `<tr class="${c.player ? "me" : ""} ${c.alive ? "" : "dead"}"><td>${i + 1}. <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</td><td>${fmt(h.score, 2)}</td><td>${EUR(h.price)}</td><td>${EUR(E.sum(c.dps))}</td>
+      <td>${M(h.rev)}</td><td class="${h.npRec < 0 ? "bad" : ""}">${M(h.npRec)}</td><td>${pct(m)}</td><td>${M(h.cash)}</td><td>${fmt(de, 2)}</td><td>${c.alive ? Object.keys(c.div).length : 0}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
     }).join("");
     const chart = lineChart(G.companies.map(c => ({ label: c.name.split(" ")[0], color: c.color, w: c.player ? 2.8 : 1.6, pts: c.hist.map(x => [yearOf(x.t), x.score]) })), { aria: "Évolution des scores", h: 260, fy: v => fmt(v, 0) });
-    return `<section class="section"><div class="section-head"><h2>Classement</h2><span class="muted small">Score = cours + dividende moyen par action</span></div>
-<div class="tbl-wrap"><table><thead><tr><th>Société</th><th>Score</th><th>Cours</th><th>Div. moyen</th><th>CA</th><th>RN courant</th><th>Marge op.</th><th>Trésorerie</th><th>Dette / FP</th><th>Divisions</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    return `<section class="section"><div class="section-head"><h2>Classement</h2><span class="muted small">Score = cours + dividendes cumulés par action</span></div>
+<div class="tbl-wrap"><table><thead><tr><th>Société</th><th>Score</th><th>Cours</th><th>Div. cumulés</th><th>CA</th><th>RN courant</th><th>Marge op.</th><th>Trésorerie</th><th>Dette / FP</th><th>Divisions</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
 <div class="panel">${chart}</div>
 <p class="small muted">Les concurrents sont pilotés par des stratégies différentes, révélées au bilan final. Observez leurs investissements dans l'onglet Marchés pour anticiper les surcapacités.</p></section>`;
   }
@@ -623,13 +648,13 @@ ${S.result ? renderSheet() : ""}`;
 
   /* ---------------- Règles ---------------- */
   function tabRegles() {
-    const p = S.G ? S.G.params : { cap: 0.55, overdraft: 0.12, maxDE: 1.5, ebitdaMult: 3, maxDil: 0.2, maxBuyback: 0.1, recov: 0.4, issueDisc: 0.1 };
+    const p = S.G ? S.G.params : { cap: 0.55, overdraft: 0.12, maxDE: 1.5, ebitdaMult: 3, maxDil: 0.2, maxBuyback: 0.1, recov: 0.4, issueDisc: 0.1, disRecov: 0.75, disFloor: 0.5, maxDisinv: 0.5 };
     return `<section class="rules">
 <div><h2>Règles du jeu</h2><p class="muted">Le modèle est volontairement simple : il illustre des mécanismes de stratégie, il ne prétend pas reproduire un marché réel.</p></div>
-<div><h3>Objectif et score</h3><p>Chaque exercice, le score de chaque société vaut son cours de bourse plus le dividende moyen par action versé depuis le premier exercice. Toutes les sociétés démarrent à 10,00 €.</p>
-<p class="formula">score = cours + dividende moyen par action</p>
-<p class="formula">cours = valeur ÷ nombre d'actions · valeur = PER × résultat net courant</p>
-<p>Le PER d'une société est la moyenne, pondérée par le chiffre d'affaires, du PER de ses créneaux : de 10 à 45 selon la croissance des trois derniers exercices, avec une prime pour certains métiers peu cycliques. Si le résultat est faible ou négatif, la valeur ne descend pas sous la moitié des fonds propres. Les plus-values ou moins-values de cession n'entrent pas dans la valorisation.</p></div>
+<div><h3>Objectif et score</h3><p>Chaque exercice, le score de chaque société vaut son cours de bourse plus les dividendes par action versés depuis le premier exercice : c'est ce qu'a gagné un actionnaire présent depuis le début. Toutes les sociétés démarrent à 10,00 €.</p>
+<p class="formula">score = cours + dividendes cumulés par action</p>
+<p class="formula">valeur = Σ divisions max(PER × résultat opérationnel normatif après impôt ; plancher × actifs) + trésorerie − dette</p>
+<p>Le marché valorise chaque division séparément. Son PER va de 10 à 45 selon la croissance du créneau sur les trois derniers exercices, avec une prime pour certains métiers peu cycliques. Le résultat normatif est la moyenne des deux derniers exercices. Une division peu ou pas rentable vaut au moins une fraction de ses actifs : de 40 % dans un créneau stagnant ou en déclin à 100 % dans un créneau en forte croissance, car des capacités installées sur un marché porteur ont une valeur même avant d'être rentables. La trésorerie compte pour sa valeur, la dette en moins : distribuer ou thésauriser ne change pas le score, investir le change selon ce que l'investissement rapporte. Cours = valeur ÷ nombre d'actions.</p></div>
 <div><h3>Marchés et prix</h3><ul>
 <li>Chaque créneau suit un cycle de vie (émergence, croissance, maturité, déclin), perturbé par la conjoncture et des événements annoncés en début d'exercice.</li>
 <li>La capacité d'une division vaut ses actifs divisés par l'intensité capitalistique du créneau. Les actifs s'usent de 5 à 15 % par an : sans investissement, la capacité décroît.</li>
@@ -641,12 +666,13 @@ ${S.result ? renderSheet() : ""}`;
 <li><b>Dividende</b> : part du résultat net courant distribuée.</li>
 <li><b>Emprunt</b> : une ligne à la fois, plafonnée à ${fmt(p.ebitdaMult)} × EBITDA et ${fmt(p.maxDE, 1)} × fonds propres. Taux = taux directeur + 1,5 point + prime de levier. Fonds versés à la clôture, remboursement linéaire.</li>
 <li><b>Capital</b> : augmentation jusqu'à ${pct(p.maxDil, 0)} des actions par an, avec une décote de ${pct(p.issueDisc, 0)} ; rachat jusqu'à ${pct(p.maxBuyback, 0)}, avec une prime de 5 %.</li>
-<li><b>Désinvestissement</b> : cession d'une partie ou de la totalité des actifs d'une division, récupérée à leur valeur comptable dans l'exercice. La capacité baisse d'autant, l'expérience acquise est conservée. Utile pour retirer du capital d'un créneau peu porteur et le réinvestir ailleurs.</li>
+<li><b>Désinvestissement</b> : cession d'une partie des actifs d'une division, au plus ${pct(p.maxDisinv, 0)} par exercice, reprise à ${pct(p.disRecov, 0)} de sa valeur comptable (jusqu'à ${pct(p.disFloor, 0)} seulement quand le créneau est en surcapacité). La moins-value passe en résultat exceptionnel. La capacité baisse d'autant, l'expérience acquise est conservée. Pour sortir d'un coup, il faut vendre ou fermer la division.</li>
 <li><b>Cessions de division</b> : mise en vente avec un prix minimal (offres examinées l'année suivante) ou fermeture immédiate qui récupère ${pct(p.recov, 0)} de la valeur des actifs.</li>
 <li><b>Acquisitions</b> : offres sur les divisions mises en vente par les concurrents. La division achetée fusionne avec la vôtre, actifs et expérience compris.</li></ul></div>
 <div><h3>Régulation et risques</h3><ul>
-<li>Au-delà du seuil de position dominante (${pct(p.cap, 0)} ici), l'investissement d'une division est limité au maintien de ses actifs, et tout rachat qui ferait franchir ce seuil est interdit.</li>
+<li>Au-delà du seuil de position dominante (${pct(p.cap, 0)} ici), l'investissement d'une division est limité au maintien de ses actifs, tout rachat qui ferait franchir ce seuil est interdit, et ses tarifs sont régulés : en pénurie, elle vend au prix d'équilibre, sans la hausse dont profitent ses concurrents.</li>
 <li>Le banquier accorde un découvert d'environ ${pct(p.overdraft, 0)} du chiffre d'affaires. Si la trésorerie de clôture passe en dessous, la société est en cessation de paiements : la partie s'arrête.</li>
+<li>Une société en faillite quitte le marché ; le liquidateur met ses divisions en vente l'exercice suivant, au prix minimal de 20 % de leurs actifs. Sans repreneur, les capacités sont démantelées.</li>
 <li>La banque centrale fait évoluer son taux directeur ; les emprunts en cours restent à taux fixe.</li></ul></div>
 <div><h3>Concurrents</h3><p>Quatre sociétés pilotées par l'ordinateur, chacune avec sa propre philosophie (défense du métier, conquête de parts, rente, diversification, opportunisme). Elles réagissent aux pénuries, aux surcapacités et aux mises en vente. Leurs profils sont révélés à la fin de la partie.</p></div>
 <div><h3>Lire la matrice</h3><p>En abscisse, la part de marché relative (votre part divisée par celle du premier concurrent ; 1 = égalité avec le leader). En ordonnée, la croissance du créneau. Elle sert à équilibrer le portefeuille : les vaches à lait financent les vedettes et les dilemmes que l'on a choisi de transformer en vedettes.</p></div>
@@ -668,7 +694,7 @@ ${S.result ? renderSheet() : ""}`;
     const rows = list.map((c, i) => {
       const hh = lastH(c);
       const prof = c.player ? "Vous" : (E.PERSONAS[c.persona] ? E.PERSONAS[c.persona].label : "");
-      return `<tr class="${c.player ? "me" : ""} ${c.alive ? "" : "dead"}"><td>${i + 1}. <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</td><td style="text-align:left">${esc(prof)}</td><td>${fmt(hh.score, 2)}</td><td>${EUR(hh.price)}</td><td>${EUR(E.sum(c.dps) / Math.max(1, c.dps.length))}</td><td>${M(hh.rev)}</td><td>${M(hh.npRec)}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
+      return `<tr class="${c.player ? "me" : ""} ${c.alive ? "" : "dead"}"><td>${i + 1}. <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</td><td style="text-align:left">${esc(prof)}</td><td>${fmt(hh.score, 2)}</td><td>${EUR(hh.price)}</td><td>${EUR(E.sum(c.dps))}</td><td>${M(hh.rev)}</td><td>${M(hh.npRec)}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
     }).join("");
     const byQ = { vedette: 0, vache: 0, dilemme: 0, poids: 0 };
     let entries = 0;
@@ -680,7 +706,7 @@ ${S.result ? renderSheet() : ""}`;
     return `<section class="section podium">
   <div><div class="eyebrow">Assemblée générale de clôture · ${esc(G.title)} · graine ${G.seed}</div><p class="verdict">${verdict}</p></div>
   <div class="statgrid">${stat("Score final", fmt(h.score, 2))}${stat("Rendement total pour l'actionnaire", pct(tsr, 0), tsr < 0 ? "bad" : "good")}${stat("Rendement annuel moyen", pct(cagr, 1), cagr < 0 ? "bad" : "")}${stat("Chiffre d'affaires final", M(h.rev))}${stat("Résultat net courant final", M(h.npRec), h.npRec < 0 ? "bad" : "")}${stat("Dette finale", M(h.debt))}</div>
-  <div class="tbl-wrap"><table><thead><tr><th>Société</th><th style="text-align:left">Profil</th><th>Score</th><th>Cours</th><th>Div. moyen</th><th>CA final</th><th>RN final</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="tbl-wrap"><table><thead><tr><th>Société</th><th style="text-align:left">Profil</th><th>Score</th><th>Cours</th><th>Div. cumulés</th><th>CA final</th><th>RN final</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   <div class="panel">${chart}</div>
   <div class="fin-grid">
     <div class="panel"><b>Où sont allés vos investissements</b>${qbar}<p class="small muted">Position de la division au moment de chaque décision. Total investi : ${M(totInv)} ; ${entries} entrée${entries > 1 ? "s" : ""} sur un nouveau créneau, ${exits} sortie${exits > 1 ? "s" : ""}.</p></div>
@@ -690,6 +716,24 @@ ${S.result ? renderSheet() : ""}`;
   }
 
   /* ---------------- Feuille de résultats ---------------- */
+  function bridgeBlock(co) {
+    const b = E.priceBridge(co);
+    if (!b) return "";
+    const eu = x => sign(x, v => fmt(v, 2)) + " €";
+    const line = (k, v, sub) => `<div class="kv ${sub ? "sub" : ""}"><span>${k}</span><span class="num ${v < -0.005 ? "bad" : v > 0.005 ? "good" : ""}">${eu(v)}</span></div>`;
+    const divs = Object.keys(b.divs).map(sid => [segOf(sid).name, b.divs[sid]]).filter(x => Math.abs(x[1]) >= 0.005).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]));
+    const f = b.flows;
+    const cash = [["Autofinancement", f.caf], ["Investissements", f.inv], ["Dividendes versés", f.div], ["Cessions et acquisitions", f.ma], ["Capital (émission − rachat)", f.capital]].filter(x => Math.abs(x[1]) >= 0.005);
+    return `<details class="bridge"><summary><b>Pourquoi le score a bougé</b> <span class="muted small">par action</span></summary>
+  <div class="bridge-body">
+    ${line("Valeur des divisions", E.sum(divs, x => x[1]))}${divs.map(x => line(esc(x[0]), x[1], true)).join("")}
+    ${line("Trésorerie nette", b.netCash)}${cash.map(x => line(x[0], x[1], true)).join("")}
+    ${Math.abs(b.shares) >= 0.005 ? line("Nombre d'actions", b.shares) : ""}${Math.abs(b.rest) >= 0.005 ? line("Plancher de valorisation (fonds propres)", b.rest) : ""}
+    ${line("Dividende de l'exercice", b.dps)}
+    <div class="kv total"><span>Variation du score</span><span class="num">${eu(b.dScore)}</span></div>
+    <p class="small muted">Investir fait baisser la trésorerie nette tout de suite ; la valeur des divisions ne suit que si l'investissement rapporte. Emprunter ne change pas la trésorerie nette.</p>
+  </div></details>`;
+  }
   function renderSheet() {
     const G = S.G, R = S.result, co = player();
     const h = lastH(co), h0 = co.hist[co.hist.length - 2] || h;
@@ -697,7 +741,7 @@ ${S.result ? renderSheet() : ""}`;
     const rk = R.ranking;
     const pos = rk.findIndex(x => x.player) + 1;
     const ma = R.ma.filter(m => m.player).map(m => m.buyer ? `${m.buyer} rachète « ${m.seg} » à ${m.seller} pour ${M(m.amt)}.` : null).filter(Boolean);
-    const notes = R.notes.concat(ma).concat(R.bankrupt.filter(n => n !== co.name).map(n => `${n} fait faillite : ses capacités quittent le marché.`));
+    const notes = R.notes.concat(ma).concat(R.bankrupt.filter(n => n !== co.name).map(n => `${n} fait faillite : ses capacités quittent le marché et ses divisions seront vendues par le liquidateur.`));
     const nextNews = !G.over ? G.news : [];
     const bankrupt = G.bankrupt;
     return `<div class="sheet-back"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rs-title">
@@ -708,6 +752,7 @@ ${S.result ? renderSheet() : ""}`;
     <div><div class="muted small">Rang</div><div class="big-score" style="font-size:1.8rem">${pos}<span class="muted" style="font-size:1rem">/${rk.length}</span></div></div>
   </div>
   <div class="statgrid">${stat("Chiffre d'affaires", M(h.rev))}${stat("Résultat opérationnel", M(h.ebit), h.ebit < 0 ? "bad" : "")}${stat("Résultat net", M(h.np), h.np < 0 ? "bad" : "")}${stat("Dividendes", M(h.dividends))}${stat("Investissements", M(h.inv))}${stat("Trésorerie", M(h.cash), h.cash < 0 ? "bad" : "")}${stat("Dette", M(h.debt))}${stat("Cours", EUR(h.price))}</div>
+  ${bankrupt ? "" : bridgeBlock(co)}
   ${notes.length ? `<div><b>À noter</b><ul class="notes">${notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}
   <div><b>Classement</b><div class="rank-list">${rk.map((x, i) => { const c = E.coById(G, x.id); return `<div class="rank-row ${x.player ? "me" : ""}"><span>${i + 1}.</span><span><i class="dot" style="background:${c.color}"></i>${esc(x.name)}${x.alive ? "" : ' <span class="bad small">faillite</span>'}</span><span class="num">${fmt(x.score, 2)}</span></div>`; }).join("")}</div></div>
   ${nextNews.length ? `<div><b>À l'ordre du jour de ${yearOf(G.year + 1)}</b><div class="news" style="margin-top:6px">${nextNews.map(n => `<div class="news-item"><div class="eyebrow">${esc(n.kind)}</div><p>${esc(n.text)}</p></div>`).join("")}</div></div>` : ""}
@@ -719,6 +764,7 @@ ${S.result ? renderSheet() : ""}`;
      ACTIONS
      ================================================================ */
   function startGame(opts) {
+    clearInterval(timerH); timerH = null;
     const seed = opts.seed ? (Math.abs(parseInt(opts.seed, 10)) >>> 0) || 1 : ((Math.random() * 4294967295) >>> 0) || 7;
     S.G = E.newGame(opts.scenario, { seed, years: opts.years, playerName: (opts.name || "").trim() || undefined });
     S.draft = freshDraft();
@@ -730,14 +776,35 @@ ${S.result ? renderSheet() : ""}`;
   }
   function openYear() { S.deadline = S.sel.timer ? Date.now() + S.sel.timer * 1000 : 0; }
 
+  /* Temps écoulé sur une décision qui mène à la cessation de paiements : le directeur
+     financier annule les offres de rachat puis réduit les investissements au prorata. */
+  function cfoTrim() {
+    const d = S.draft, notes = [];
+    if (Object.keys(d.bids).some(k => d.bids[k] > 0)) { d.bids = {}; notes.push("annulé vos offres de rachat"); }
+    const est = estimate();
+    if (est.lvl === "bad" && est.inv > 0) {
+      // plus grande fraction des investissements qui laisse, dans l'aperçu, une trésorerie positive
+      const base = Object.assign({}, d.invest);
+      const apply = k => { for (const sid in base) d.invest[sid] = Math.floor((+base[sid] || 0) * k); };
+      const safe = k => { apply(k); const e = estimate(); return e.lvl !== "bad" && e.end >= 0; };
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (safe(mid)) lo = mid; else hi = mid; }
+      apply(lo);
+      notes.push("réduit les investissements de " + pct(1 - lo, 0));
+    }
+    return notes.length ? "Temps écoulé : pour éviter la cessation de paiements, le directeur financier a " + notes.join(" et ") + "." : null;
+  }
+
   function validate(force) {
     if (!S.G || S.G.over || S.result) return;
     const est = estimate();
     if (est.lvl === "bad" && !S.confirmRisk && !force) { S.confirmRisk = true; updateDerived(); return; }
+    const cfo = force && est.lvl === "bad" ? cfoTrim() : null;
     const dec = JSON.parse(JSON.stringify(S.draft));
     if (dec.loan && !(dec.loan.amount > 0)) dec.loan = null;
     const R = E.simulateYear(S.G, dec);
-    S.result = R; S.stampFx = true;
+    if (cfo) R.notes.unshift(cfo);
+    S.result = R; S.stampFx = true; S.deadline = 0;
     if (!S.G.over) S.draft = freshDraft();
     save();
     render();
@@ -762,8 +829,24 @@ ${S.result ? renderSheet() : ""}`;
     timerH = setInterval(upd, 1000);
   }
 
+  /* Le rendu remplace tout le DOM : on retrouve l'élément qui avait le focus (par son id,
+     sinon par ses attributs data-*) pour le lui rendre, curseur compris. */
+  function focusKey(el) {
+    if (!el || el === document.body || !app.contains(el)) return null;
+    if (el.id) return "#" + CSS.escape(el.id);
+    const attrs = ["act", "sid", "k", "f", "id", "tab", "lid"].filter(a => el.dataset[a] != null);
+    return attrs.length ? attrs.map(a => `[data-${a}="${CSS.escape(el.dataset[a])}"]`).join("") : null;
+  }
   function render() {
+    const a = document.activeElement, key = focusKey(a);
+    const caret = a && typeof a.selectionStart === "number" && a.type === "text" ? a.selectionStart : null;
     if (!S.G) renderHome(); else renderGame();
+    if (S.result) return; // la feuille de résultats prend le focus
+    const el = key && app.querySelector(key);
+    if (el) {
+      el.focus({ preventScroll: true });
+      if (caret != null && typeof el.setSelectionRange === "function") try { el.setSelectionRange(caret, caret); } catch (e) { /* champ sans sélection */ }
+    }
   }
 
   app.addEventListener("click", ev => {
@@ -774,7 +857,12 @@ ${S.result ? renderSheet() : ""}`;
     if (act === "start") { startGame(S.sel); return; }
     if (act === "resume") {
       const sv = loadSaved();
-      if (sv && sv.G) { S.G = sv.G; S.draft = sv.draft || freshDraft(); S.draft.disinvest = S.draft.disinvest || {}; S.q = sv.q || {}; S.sel = Object.assign(S.sel, sv.sel || {}); S.result = null; S.tab = "conseil"; openYear(); render(); }
+      if (sv && sv.G) {
+        S.G = sv.G; S.draft = sv.draft || freshDraft(); S.draft.disinvest = S.draft.disinvest || {}; S.q = sv.q || {}; S.sel = Object.assign(S.sel, sv.sel || {}); S.result = null; S.tab = "conseil";
+        // recharger la page ne remet pas le chronomètre à zéro (30 s de grâce si l'échéance est passée)
+        if (S.sel.timer && sv.deadline) S.deadline = Math.max(sv.deadline, Date.now() + 30000); else openYear();
+        render();
+      }
       return;
     }
     if (act === "discard") { clearSaved(); renderHome(); return; }
@@ -785,7 +873,7 @@ ${S.result ? renderSheet() : ""}`;
     if (act === "close-sheet") {
       S.result = null;
       if (S.G.over) S.tab = "bilan"; else openYear();
-      render(); window.scrollTo(0, 0); return;
+      save(); render(); window.scrollTo(0, 0); return;
     }
     if (act === "new") { clearSaved(); S.G = null; S.result = null; render(); window.scrollTo(0, 0); return; }
     if (act === "replay") {
@@ -829,7 +917,7 @@ ${S.result ? renderSheet() : ""}`;
     else if (k === "dis") {
       const sid = el.dataset.sid, A = player().div[sid].A;
       d.disinvest = d.disinvest || {};
-      if (v > 0) { d.disinvest[sid] = Math.min(v, A); d.invest[sid] = 0; S.q[sid] = "zero"; } else delete d.disinvest[sid];
+      if (v > 0) { d.disinvest[sid] = Math.min(v, S.G.params.maxDisinv * A); d.invest[sid] = 0; S.q[sid] = "zero"; } else delete d.disinvest[sid];
       const inp = document.getElementById("inv-" + sid);
       if (inp) { inp.disabled = v > 0; if (v > 0) inp.value = 0; }
     }
@@ -858,20 +946,32 @@ ${S.result ? renderSheet() : ""}`;
   app.addEventListener("change", ev => { if (ev.target.tagName === "SELECT") onField(ev); });
 
   window.addEventListener("resize", () => { if (!S.G) drawGuilloche(); });
+  document.addEventListener("keydown", ev => {
+    if (S.result) {
+      if (ev.key === "Escape") { const b = document.getElementById("close-sheet"); if (b) b.click(); return; }
+      if (ev.key === "Tab") { // le focus reste dans la feuille de résultats
+        const sheet = document.querySelector(".sheet");
+        const f = sheet ? Array.from(sheet.querySelectorAll("button, [href], input, select, [tabindex]:not([tabindex='-1'])")) : [];
+        if (!f.length) return;
+        const i = f.indexOf(document.activeElement);
+        if (ev.shiftKey && i <= 0) { ev.preventDefault(); f[f.length - 1].focus(); }
+        else if (!ev.shiftKey && (i === -1 || i === f.length - 1)) { ev.preventDefault(); f[0].focus(); }
+      }
+      return;
+    }
+    // onglets : flèches, Début, Fin (motif ARIA tablist)
+    const t = ev.target;
+    if (t && t.classList && t.classList.contains("tab") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(ev.key)) {
+      const tabs = Array.from(app.querySelectorAll(".tab"));
+      const i = tabs.indexOf(t);
+      const j = ev.key === "Home" ? 0 : ev.key === "End" ? tabs.length - 1 : (i + (ev.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      ev.preventDefault();
+      S.tab = tabs[j].dataset.tab; render();
+      const nt = document.getElementById("tab-" + S.tab);
+      if (nt) { nt.focus(); nt.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+    }
+  });
 
   /* ---------------- démarrage ---------------- */
-  function snapshot() { return { G: S.G, draft: S.draft, q: S.q, tab: S.tab, sel: S.sel, result: S.result, matrixCo: S.matrixCo }; }
-  function start(data) {
-    data = data || {};
-    if (data.G) {
-      Object.assign(S, { G: data.G, draft: data.draft, q: data.q || {}, tab: data.tab || "conseil", sel: Object.assign(S.sel, data.sel || {}), result: data.result || null, matrixCo: data.matrixCo || "P" });
-      if (!S.draft && !S.G.over) S.draft = freshDraft();
-      if (S.draft && !S.draft.disinvest) S.draft.disinvest = {};
-      openYear();
-    }
-    render();
-  }
-  try { if (window.claude && window.claude.hot && window.claude.hot.snapshot) window.claude.hot.snapshot(snapshot); } catch (e) { /* hors visionneuse */ }
-  const hot = window.claude && window.claude.hot;
-  if (hot && hot.ready) hot.ready(start); else start(hot && hot.data ? hot.data : {});
+  render();
 })();

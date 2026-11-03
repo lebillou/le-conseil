@@ -73,7 +73,7 @@ a { color: var(--accent); }
 .cert .serial { font-stretch: 80%; letter-spacing: 0.2em; font-size: 0.72rem; color: var(--brass); text-transform: uppercase; display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
 
 /* ---------- Accueil ---------- */
-.home { display: grid; gap: 26px; padding: 26px 0 60px; }
+.home { display: grid; gap: 26px; padding-top: 26px; padding-bottom: 60px; }
 .scen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; }
 .scen {
   text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
@@ -236,6 +236,11 @@ svg text { font-family: var(--body); fill: var(--muted); }
 .rank-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; align-items: center; font-size: 0.9rem; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .rank-row.me { font-weight: 700; }
 .rank-row:last-child { border-bottom: none; }
+.bridge summary { cursor: pointer; list-style-position: inside; }
+.bridge-body { display: grid; gap: 3px; margin-top: 8px; }
+.bridge .kv.sub { padding-left: 14px; font-size: 0.8rem; }
+.bridge .kv.total { border-top: 1px solid var(--line); padding-top: 4px; margin-top: 2px; font-weight: 700; }
+.bridge .kv.total span:first-child { color: var(--ink); }
 
 /* ---------- Journal et règles ---------- */
 .log { display: grid; gap: 14px; }

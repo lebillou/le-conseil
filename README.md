@@ -8,19 +8,27 @@ Le jeu s'inspire du principe des serious games de formation à la stratégie, co
 
 En ligne : https://lebillou.github.io/le-conseil/
 
-Ou ouvrir `index.html` dans un navigateur : le fichier est autonome, sans serveur ni installation. La partie en cours est sauvegardée dans le navigateur.
+Ou ouvrir `index.html` dans un navigateur : le fichier est autonome, sans serveur ni installation. La partie en cours est sauvegardée dans le navigateur (une partie sauvegardée par une version antérieure du moteur n'est pas reprise).
 
 ## Contenu
 
-- Trois scénarios : groupe industriel diversifié, transport terrestre longue distance, froid commercial européen.
+- Six scénarios inspirés de secteurs réels (sociétés et chiffres fictifs) :
+  - groupe industriel diversifié : choisir où concentrer les ressources avant que la vache à lait s'épuise ;
+  - transport terrestre longue distance : entrer sur la grande vitesse face aux opérateurs historiques ;
+  - froid commercial européen : la transition des fluides frigorigènes ;
+  - automobile européenne : financer la bascule électrique avec des métiers thermiques condamnés ;
+  - numérique et cloud : quitter des services peu valorisés sans se brûler sur le cloud ou la bulle des puces pour l'IA ;
+  - laboratoire pharmaceutique : préparer la falaise des brevets.
 - Courbe d'expérience (avec expérience partagée entre créneaux d'un même métier), équilibre offre/demande, cycle de vie des créneaux.
-- Investissement, désinvestissement d'actifs, vente aux enchères ou fermeture de divisions, rachat de divisions concurrentes.
+- Investissement, désinvestissement d'actifs (décoté, plafonné à 50 % par exercice), vente aux enchères ou fermeture de divisions, rachat de divisions concurrentes.
 - Dividende, emprunt bancaire, augmentation de capital, rachat d'actions.
-- Seuil de position dominante, faillite au-delà du découvert autorisé, événements de conjoncture.
+- Seuil de position dominante (investissement limité au maintien, tarifs régulés), faillite au-delà du découvert autorisé, événements de conjoncture.
 - Concurrents aux profils différents (gardien du métier, conquérant, rentier, diversifieur, opportuniste), révélés en fin de partie.
+- Aperçu de l'exercice avant validation (conjoncture sans aléa, concurrents au rythme de leur marché) et décomposition de la variation du cours par division dans le procès-verbal.
+- Faillite d'un concurrent : ses divisions sont vendues par le liquidateur l'exercice suivant.
 - Matrice BCG, comptes consolidés, journal, chronomètre optionnel, graine pour rejouer la même conjoncture.
 
-Score = cours + dividende moyen par action ; cours = PER sectoriel × résultat net courant ÷ nombre d'actions. Toutes les sociétés démarrent à 10 €. Les règles détaillées sont dans l'onglet « Règles » du jeu.
+Score = cours + dividendes cumulés par action. La valeur de la société est la somme de ses divisions (PER sectoriel × résultat opérationnel normatif après impôt, avec un plancher en fraction des actifs qui dépend de la croissance du créneau), plus la trésorerie, moins la dette. Toutes les sociétés démarrent à 10 €. Les règles détaillées sont dans l'onglet « Règles » du jeu.
 
 ## Structure
 
@@ -30,13 +38,15 @@ build.py          assemble src/ en index.html
 src/engine.js     moteur de simulation pur, sans DOM (utilisable sous Node)
 src/ui.js         interface
 src/shell.html    gabarit HTML et feuille de style
-tools/            simulations sans interface pour le calibrage
+tools/            tests et simulations sans interface pour le calibrage
 ```
 
 ## Modifier le jeu
 
 ```bash
 python3 build.py                 # régénère index.html après modification de src/
+node tools/check.js              # tests de non-régression (reproductibilité, comptabilité, règles, calibrage)
+node tools/strategies.js froid   # stratégies lisibles comparées sur 20 graines : score, rang, victoires
 node tools/test_sim.js           # 20 parties par scénario avec trois stratégies simples
 node tools/search.js froid 200   # recherche aléatoire de stratégies sur un scénario
 node tools/dbg.js transport 1 P  # trajectoire d'une société sur une graine donnée

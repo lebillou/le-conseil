@@ -73,7 +73,7 @@ a { color: var(--accent); }
 .cert .serial { font-stretch: 80%; letter-spacing: 0.2em; font-size: 0.72rem; color: var(--brass); text-transform: uppercase; display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
 
 /* ---------- Accueil ---------- */
-.home { display: grid; gap: 26px; padding: 26px 0 60px; }
+.home { display: grid; gap: 26px; padding-top: 26px; padding-bottom: 60px; }
 .scen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; }
 .scen {
   text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
@@ -236,6 +236,11 @@ svg text { font-family: var(--body); fill: var(--muted); }
 .rank-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; align-items: center; font-size: 0.9rem; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .rank-row.me { font-weight: 700; }
 .rank-row:last-child { border-bottom: none; }
+.bridge summary { cursor: pointer; list-style-position: inside; }
+.bridge-body { display: grid; gap: 3px; margin-top: 8px; }
+.bridge .kv.sub { padding-left: 14px; font-size: 0.8rem; }
+.bridge .kv.total { border-top: 1px solid var(--line); padding-top: 4px; margin-top: 2px; font-weight: 700; }
+.bridge .kv.total span:first-child { color: var(--ink); }
 
 /* ---------- Journal et règles ---------- */
 .log { display: grid; gap: 14px; }
@@ -276,9 +281,14 @@ var ENGINE = (function () {
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
   const sum = (arr, f) => arr.reduce((s, x) => s + (f ? f(x) : x), 0);
 
-  /* ---------- Aléa reproductible (mulberry32, état dans G) ---------- */
-  function rnd(G) {
-    let a = (G.rng = (G.rng + 0x6D2B79F5) | 0);
+  /* ---------- Aléa reproductible (mulberry32, état dans G) ----------
+     Deux flux indépendants : G.rng pour la conjoncture (demande, événements, taux),
+     G.rngAI pour les décisions des concurrents. Le nombre de tirages du premier ne
+     dépend jamais des décisions : une même graine rejoue la même conjoncture. */
+  const VERSION = 2;
+  function rnd(G, key) {
+    key = key || "rng";
+    let a = (G[key] = (G[key] + 0x6D2B79F5) | 0);
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -316,7 +326,7 @@ var ENGINE = (function () {
       desc: "Cherche la part de marché dans les créneaux en croissance, finance par dette et augmentations de capital.",
       payout: 0.12, aggr: 1.0, push: 0.55, harvestG: -0.02, harvestRS: 0.35, util: 0.95,
       debt: true, equity: true, entry: 0.30, entryShare: 0.12, odUse: 0.45, exitPatience: 4,
-      buyback: false, flexDiv: true, loanYears: 8
+      buyback: false, flexDiv: true, loanYears: 8, cfUse: 0.7
     },
     rentier: {
       label: "Rentier",
@@ -330,7 +340,7 @@ var ENGINE = (function () {
       desc: "Multiplie les entrées dans les créneaux nouveaux, au risque de la dispersion.",
       payout: 0.30, aggr: 0.55, push: 0.3, harvestG: 0.0, harvestRS: 0.5, util: 0.96,
       debt: true, equity: false, entry: 0.45, entryShare: 0.10, odUse: 0.15, exitPatience: 3,
-      buyback: false, flexDiv: true, loanYears: 7
+      buyback: false, flexDiv: true, loanYears: 7, cfUse: 0.85
     },
     opportuniste: {
       label: "Opportuniste",
@@ -345,6 +355,7 @@ var ENGINE = (function () {
   const SCENARIOS = [
     {
       id: "industrie",
+      difficulty: "Intermédiaire",
       title: "Groupe industriel diversifié",
       kicker: "Portefeuille hétérogène",
       pitch: "Vous présidez un groupe présent dans sept métiers, du carton d'emballage aux batteries stationnaires. Votre vache à lait, les pièces de moteurs thermiques, est condamnée à terme. Il faut choisir où concentrer les ressources avant qu'elle ne s'épuise.",
@@ -380,6 +391,7 @@ var ENGINE = (function () {
     },
     {
       id: "transport",
+      difficulty: "Intermédiaire",
       title: "Transport terrestre longue distance",
       kicker: "Challenger face aux opérateurs historiques",
       pitch: "Leader européen de l'autocar, vous pouvez entrer sur la grande vitesse ferroviaire que l'ouverture à la concurrence rend accessible. Les opérateurs historiques ont l'expérience et les moyens ; le régulateur leur interdit en revanche de renforcer leurs monopoles.",
@@ -393,13 +405,13 @@ var ENGINE = (function () {
         { id: "D", name: "Rotaia", color: "#7A5AA6", persona: "conquerant", cash: 0.10, debt: 0.40, debtYears: 7 }
       ],
       segments: [
-        { id: "gvfr", name: "Grande vitesse France", group: "rail", D0: 900, path: [[0, 0.03], [20, 0.025]], capex: 2.4, slope: 0.85, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.35,
+        { id: "gvfr", name: "Grande vitesse France", group: "rail", D0: 900, path: [[0, 0.03], [20, 0.025]], capex: 2.4, slope: 0.90, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.8,
           pos: { A: 0.85, D: 0.15 } },
-        { id: "gvde", name: "Grande vitesse Allemagne", group: "rail", D0: 700, path: [[0, 0.04], [20, 0.03]], capex: 2.4, slope: 0.85, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.35,
+        { id: "gvde", name: "Grande vitesse Allemagne", group: "rail", D0: 700, path: [[0, 0.04], [20, 0.03]], capex: 2.4, slope: 0.90, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.8,
           pos: { B: 0.90, A: 0.10 } },
-        { id: "gves", name: "Grande vitesse Espagne", group: "rail", D0: 450, path: [[0, 0.09], [8, 0.06], [20, 0.035]], capex: 2.4, slope: 0.84, mu: 0.25, eps: 1.4, dep: 0.05, vol: 0.012, H: 8, entryX: 0.40,
+        { id: "gves", name: "Grande vitesse Espagne", group: "rail", D0: 450, path: [[0, 0.09], [8, 0.06], [20, 0.035]], capex: 2.4, slope: 0.90, mu: 0.25, eps: 1.4, dep: 0.05, vol: 0.012, H: 8, entryX: 0.8,
           pos: { C: 0.60, A: 0.20, D: 0.20 } },
-        { id: "gvit", name: "Grande vitesse Italie", group: "rail", D0: 500, path: [[0, 0.05], [20, 0.035]], capex: 2.4, slope: 0.85, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.35,
+        { id: "gvit", name: "Grande vitesse Italie", group: "rail", D0: 500, path: [[0, 0.05], [20, 0.035]], capex: 2.4, slope: 0.90, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.8,
           pos: { D: 0.72, A: 0.28 } },
         { id: "icfr", name: "Intercités France", group: "rail", D0: 400, path: [[0, -0.02], [20, -0.03]], capex: 1.6, slope: 0.88, mu: 0.20, eps: 1.3, dep: 0.06, vol: 0.010, H: 12,
           pos: { A: 0.90, P: 0.10 } },
@@ -419,6 +431,7 @@ var ENGINE = (function () {
     },
     {
       id: "froid",
+      difficulty: "Difficile",
       title: "Froid commercial européen",
       kicker: "Leader national face à la transition des fluides",
       pitch: "Leader français du meuble frigorifique, vous êtes présent partout en Europe mais rarement en tête. La réglementation sur les fluides frigorigènes condamne les vitrines HFC et fait exploser les centrales CO₂ transcritiques, où un concurrent nordique a pris de l'avance. Les services, peu capitalistiques, sont valorisés par le marché.",
@@ -453,6 +466,122 @@ var ENGINE = (function () {
         { t: 4, text: "Révision du règlement F-gaz : interdiction anticipée des HFC dans les vitrines neuves. Les centrales CO₂ deviennent la norme.",
           gShift: { hfc: -0.06, co2: 0.03 } }
       ]
+    },
+    {
+      id: "auto",
+      difficulty: "Difficile",
+      title: "Automobile européenne",
+      kicker: "Financer la bascule électrique",
+      pitch: "Généraliste européen, vous dominez les citadines thermiques, les utilitaires et l'après-vente. Ces métiers financent le groupe mais l'interdiction programmée des moteurs thermiques les condamne. Un constructeur asiatique a pris de l'avance sur l'électrique et les batteries. Il faut décider quoi exploiter, quoi abandonner et où investir pendant qu'il reste du cash.",
+      startYear: 2027,
+      params: { cap: 0.55, rate: 0.030, overdraft: 0.12 },
+      companies: [
+        { id: "P", name: "Valmont Automobiles", color: "#C8432B", player: true, cash: 0.08, debt: 0.30, debtYears: 6, payout: 0.30 },
+        { id: "A", name: "Hartwig Motoren", color: "#2F6E96", persona: "gardien", cash: 0.10, debt: 0.20, debtYears: 6 },
+        { id: "B", name: "Kaishan Motors", color: "#7A5AA6", persona: "conquerant", cash: 0.10, debt: 0.25, debtYears: 7 },
+        { id: "C", name: "Ostrava Auto", color: "#A88328", persona: "rentier", cash: 0.10 },
+        { id: "D", name: "Aldren Mobility", color: "#2E8A6A", persona: "diversifieur", cash: 0.08, debt: 0.15, debtYears: 5 }
+      ],
+      segments: [
+        { id: "cth", name: "Citadines thermiques", group: "thermique", D0: 700, path: [[0, -0.03], [5, -0.07], [10, -0.12], [20, -0.12]], capex: 0.9, slope: 0.85, mu: 0.20, eps: 1.6, dep: 0.08, vol: 0.012,
+          pos: { P: 0.40, C: 0.35, A: 0.10, D: 0.15 } },
+        { id: "sth", name: "Berlines et SUV thermiques", group: "thermique", D0: 900, path: [[0, -0.01], [5, -0.05], [10, -0.10], [20, -0.10]], capex: 1.0, slope: 0.85, mu: 0.26, eps: 1.5, dep: 0.08, vol: 0.012,
+          pos: { A: 0.45, P: 0.20, C: 0.20, D: 0.15 } },
+        { id: "utl", name: "Utilitaires légers", group: "thermique", D0: 400, path: [[0, 0.02], [10, 0.0], [20, -0.03]], capex: 0.9, slope: 0.85, mu: 0.22, eps: 1.5, dep: 0.08, vol: 0.012,
+          pos: { P: 0.40, C: 0.30, A: 0.30 } },
+        { id: "cve", name: "Compactes électriques", group: "electrique", D0: 250, path: [[0, 0.20], [6, 0.15], [12, 0.08], [20, 0.04]], capex: 1.3, slope: 0.78, mu: 0.24, eps: 1.7, dep: 0.10, vol: 0.020, entryX: 0.5,
+          pos: { B: 0.45, D: 0.25, P: 0.15, A: 0.15 } },
+        { id: "sve", name: "SUV électriques", group: "electrique", D0: 300, path: [[0, 0.16], [6, 0.12], [12, 0.07], [20, 0.04]], capex: 1.4, slope: 0.80, mu: 0.28, eps: 1.6, dep: 0.10, vol: 0.020, entryX: 0.5,
+          pos: { A: 0.40, B: 0.35, D: 0.25 } },
+        { id: "btr", name: "Batteries de traction", group: "batterie", D0: 200, path: [[0, 0.22], [6, 0.15], [12, 0.07], [20, 0.04]], capex: 1.6, slope: 0.72, mu: 0.26, eps: 1.8, dep: 0.10, vol: 0.025, entryX: 0.4,
+          pos: { B: 0.70, D: 0.30 } },
+        { id: "apv", name: "Pièces et après-vente", group: "service", D0: 350, path: [[0, 0.03], [20, 0.01]], capex: 0.5, slope: 0.88, mu: 0.32, eps: 1.3, dep: 0.10, vol: 0.008, perBonus: 4,
+          pos: { P: 0.30, A: 0.30, C: 0.25, D: 0.15 } },
+        { id: "logi", name: "Logiciel et services connectés", group: "logiciel", D0: 80, path: [[0, 0.18], [8, 0.12], [20, 0.06]], capex: 0.4, slope: 0.70, mu: 0.38, eps: 1.4, dep: 0.20, vol: 0.030, perBonus: 3, entryX: 0.5,
+          pos: { D: 0.40, A: 0.30, B: 0.15, P: 0.15 } }
+      ],
+      scripted: [
+        { t: 4, text: "L'Union confirme la fin des ventes de voitures thermiques neuves et durcit les normes intermédiaires : la demande thermique recule plus vite, l'électrique accélère.",
+          gShift: { cth: -0.03, sth: -0.03, utl: -0.02, cve: 0.02, sve: 0.02, btr: 0.02 } },
+        { t: 7, text: "Effondrement du prix du lithium : le coût des batteries baisse de 15 %, celui des véhicules électriques de 8 % cette année.",
+          cost: { btr: 0.85, cve: 0.92, sve: 0.92 } }
+      ]
+    },
+    {
+      id: "numerique",
+      difficulty: "Intermédiaire",
+      title: "Numérique et cloud",
+      kicker: "Services informatiques face aux plateformes",
+      pitch: "Champion européen de l'intégration et de l'infogérance, vous êtes rentable mais faiblement valorisé : ces métiers croissent peu et le marché les paie mal. Les logiciels et la cybersécurité valent bien plus, le cloud est verrouillé par une plateforme américaine, et les puces pour l'intelligence artificielle s'arrachent. Reste à savoir si cet engouement va durer.",
+      startYear: 2027,
+      params: { cap: 0.60, rate: 0.030, overdraft: 0.12 },
+      companies: [
+        { id: "P", name: "Sorevia", color: "#C8432B", player: true, cash: 0.10, debt: 0.20, debtYears: 5, payout: 0.30 },
+        { id: "A", name: "Kalder Systems", color: "#2F6E96", persona: "gardien", cash: 0.10, debt: 0.15, debtYears: 6 },
+        { id: "B", name: "Northgate Cloud", color: "#7A5AA6", persona: "conquerant", cash: 0.12, debt: 0.20, debtYears: 7 },
+        { id: "C", name: "Marbeck Data", color: "#A88328", persona: "opportuniste", cash: 0.08, debt: 0.20, debtYears: 6 },
+        { id: "D", name: "Ilios Tech", color: "#2E8A6A", persona: "diversifieur", cash: 0.09, debt: 0.10, debtYears: 5 }
+      ],
+      segments: [
+        { id: "itg", name: "Intégration et infogérance", group: "service", D0: 700, path: [[0, 0.02], [20, 0.01]], capex: 0.3, slope: 0.93, mu: 0.14, eps: 1.4, dep: 0.15, vol: 0.010,
+          pos: { P: 0.40, C: 0.25, A: 0.20, D: 0.15 } },
+        { id: "hw", name: "Serveurs et stockage", group: "materiel", D0: 500, path: [[0, 0.03], [20, 0.01]], capex: 0.9, slope: 0.82, mu: 0.22, eps: 1.6, dep: 0.10, vol: 0.012,
+          pos: { A: 0.45, P: 0.20, C: 0.20, D: 0.15 } },
+        { id: "cld", name: "Cloud d'infrastructure", group: "cloud", D0: 400, path: [[0, 0.18], [8, 0.12], [20, 0.06]], capex: 1.8, slope: 0.74, mu: 0.30, eps: 1.6, dep: 0.12, vol: 0.015, entryX: 0.4,
+          pos: { B: 0.60, A: 0.25, D: 0.15 } },
+        { id: "csv", name: "Cloud souverain", group: "cloud", D0: 60, path: [[0, 0.12], [20, 0.08]], capex: 1.6, slope: 0.78, mu: 0.30, eps: 1.5, dep: 0.12, vol: 0.020, entryX: 0.5, perBonus: 2,
+          pos: { C: 0.50, P: 0.25, D: 0.25 } },
+        { id: "saas", name: "Logiciels d'entreprise", group: "logiciel", D0: 300, path: [[0, 0.12], [10, 0.09], [20, 0.05]], capex: 0.4, slope: 0.72, mu: 0.34, eps: 1.3, dep: 0.20, vol: 0.015, perBonus: 5, entryX: 0.5,
+          pos: { A: 0.35, D: 0.30, B: 0.20, P: 0.15 } },
+        { id: "cyb", name: "Cybersécurité", group: "logiciel", D0: 150, path: [[0, 0.15], [10, 0.11], [20, 0.07]], capex: 0.4, slope: 0.75, mu: 0.36, eps: 1.3, dep: 0.20, vol: 0.015, perBonus: 6, entryX: 0.5,
+          pos: { D: 0.40, C: 0.35, A: 0.25 } },
+        { id: "puce", name: "Puces pour l'intelligence artificielle", group: "puce", D0: 150, path: [[0, 0.30], [4, 0.25], [8, 0.10], [20, 0.05]], capex: 2.0, slope: 0.70, mu: 0.34, eps: 2.0, dep: 0.14, vol: 0.040, entryX: 0.3,
+          pos: { B: 0.55, A: 0.45 } }
+      ],
+      scripted: [
+        { t: 3, text: "Règlement européen sur la souveraineté des données : la commande publique et les secteurs régulés doivent recourir à un cloud hébergé et opéré en Europe.",
+          gShift: { csv: 0.06 } },
+        { t: 8, text: "Les centres de données ont surinvesti : les commandes de puces pour l'intelligence artificielle s'effondrent cette année et la croissance du créneau ne retrouvera pas son rythme.",
+          g: { puce: -0.20 }, gShift: { puce: -0.08 } }
+      ]
+    },
+    {
+      id: "pharma",
+      difficulty: "Difficile",
+      title: "Laboratoire pharmaceutique",
+      kicker: "Préparer la falaise des brevets",
+      pitch: "Votre laboratoire vit de sa franchise cardiovasculaire, très rentable, et de la santé grand public. Les brevets des molécules phares expirent dans quelques exercices : les génériques prendront alors l'essentiel du marché. L'oncologie, les biosimilaires et les thérapies géniques sont valorisés par le marché mais exigent des investissements lourds où des biotechs ont déjà l'avance.",
+      startYear: 2027,
+      params: { cap: 0.60, rate: 0.030, overdraft: 0.12 },
+      companies: [
+        { id: "P", name: "Laboratoires Berthier", color: "#C8432B", player: true, cash: 0.12, debt: 0.15, debtYears: 5, payout: 0.40 },
+        { id: "A", name: "Helvexa", color: "#2F6E96", persona: "gardien", cash: 0.10, debt: 0.15, debtYears: 6 },
+        { id: "B", name: "Castoria Biotech", color: "#7A5AA6", persona: "conquerant", cash: 0.10, debt: 0.30, debtYears: 7 },
+        { id: "C", name: "Genovo", color: "#A88328", persona: "rentier", cash: 0.10 },
+        { id: "D", name: "Medrill", color: "#2E8A6A", persona: "diversifieur", cash: 0.08, debt: 0.15, debtYears: 5 }
+      ],
+      segments: [
+        { id: "cvx", name: "Cardiologie de marque", group: "marque", D0: 600, path: [[0, 0.02], [20, 0.0]], capex: 0.8, slope: 0.85, mu: 0.40, eps: 1.2, dep: 0.10, vol: 0.010, perBonus: 2,
+          pos: { P: 0.55, A: 0.30, D: 0.15 } },
+        { id: "gen", name: "Génériques", group: "generique", D0: 500, path: [[0, 0.04], [20, 0.03]], capex: 0.6, slope: 0.88, mu: 0.12, eps: 1.8, dep: 0.08, vol: 0.010,
+          pos: { C: 0.50, D: 0.25, A: 0.25 } },
+        { id: "otc", name: "Santé grand public", group: "conso", D0: 350, path: [[0, 0.03], [20, 0.025]], capex: 0.5, slope: 0.88, mu: 0.30, eps: 1.4, dep: 0.08, vol: 0.008, perBonus: 4,
+          pos: { P: 0.35, A: 0.25, D: 0.40 } },
+        { id: "vac", name: "Vaccins", group: "vaccin", D0: 200, path: [[0, 0.04], [20, 0.04]], capex: 1.2, slope: 0.82, mu: 0.30, eps: 1.5, dep: 0.10, vol: 0.060,
+          pos: { A: 0.40, P: 0.30, D: 0.30 } },
+        { id: "onco", name: "Oncologie", group: "bio", D0: 250, path: [[0, 0.10], [20, 0.07]], capex: 1.5, slope: 0.80, mu: 0.42, eps: 1.2, dep: 0.12, vol: 0.020, perBonus: 5, entryX: 0.35,
+          pos: { B: 0.40, A: 0.35, P: 0.25 } },
+        { id: "bios", name: "Biosimilaires", group: "bio", D0: 120, path: [[0, 0.15], [8, 0.10], [20, 0.05]], capex: 1.4, slope: 0.76, mu: 0.26, eps: 1.6, dep: 0.10, vol: 0.020, entryX: 0.4,
+          pos: { C: 0.40, B: 0.35, D: 0.25 } },
+        { id: "thg", name: "Thérapies géniques", group: "bio", D0: 30, path: [[0, 0.30], [5, 0.22], [10, 0.12], [20, 0.06]], capex: 1.8, slope: 0.70, mu: 0.45, eps: 1.4, dep: 0.14, vol: 0.050, perBonus: 3, entryX: 0.5,
+          pos: { B: 0.60, D: 0.25, A: 0.15 } }
+      ],
+      scripted: [
+        { t: 5, text: "Expiration des brevets des grands traitements cardiovasculaires : les génériques s'emparent du marché, la cardiologie de marque s'effondre cette année puis décline durablement.",
+          g: { cvx: -0.15 }, gShift: { cvx: -0.07, gen: 0.03 } },
+        { t: 9, text: "Épidémie saisonnière sévère : les commandes publiques de vaccins bondissent cette année.",
+          g: { vac: 0.25 } }
+      ]
     }
   ];
 
@@ -465,8 +594,18 @@ var ENGINE = (function () {
   const DEFAULT_PARAMS = {
     tax: 0.25, rate: 0.03, maxDE: 1.5, ebitdaMult: 3, maxLoanYears: 8,
     maxDil: 0.20, maxBuyback: 0.10, cap: 0.55, recov: 0.40, issueDisc: 0.10,
-    bcgG: 0.05, overdraft: 0.12, odPremium: 0.04
+    bcgG: 0.05, overdraft: 0.12, odPremium: 0.04,
+    disRecov: 0.75, disFloor: 0.50, maxDisinv: 0.50,
+    floorBase: 0.4, floorSlope: 4, groupX: 0.25
   };
+
+  /* Désinvestissement : actifs cédés avec décote, plus forte quand le créneau est en
+     surcapacité (personne n'a besoin de ces capacités). Plafonné par exercice : sortir
+     d'un créneau d'un coup passe par la vente ou la fermeture de la division. */
+  function disinvestRate(G, seg) {
+    const p = G.params;
+    return clamp(p.disRecov - 0.8 * Math.max(0, (seg.r || 1) - 1), p.disFloor, p.disRecov);
+  }
 
   /* ---------- Économie d'un créneau ---------- */
   function effX(G, co, seg) {
@@ -475,7 +614,7 @@ var ENGINE = (function () {
     for (const sid in co.div) {
       if (sid === seg.id) continue;
       const s2 = segById(G, sid);
-      if (s2.group === seg.group) x += 0.25 * co.div[sid].X / s2.Xnorm;
+      if (s2.group === seg.group) x += G.params.groupX * co.div[sid].X / s2.Xnorm;
     }
     return Math.max(0.05, x);
   }
@@ -499,10 +638,17 @@ var ENGINE = (function () {
     const r = seg.D > 0 ? S / seg.D : 1;
     const f = clamp(Math.pow(Math.max(r, 0.01), -seg.eps), 0.5, 1.45);
     const P = (avgC + seg.dep * seg.capex) * (1 + seg.mu) * f;
+    // Régulation tarifaire : une société en position dominante ne peut pas facturer la
+    // prime de pénurie ; elle vend au prix d'équilibre. Sans cela, le plafonnement de ses
+    // investissements lui garantirait une rente de rareté.
+    const Preg = G.params.priceCap === false ? P : Math.min(P, P / f);
     players.forEach(co => {
       const d = co.div[seg.id];
       d.share = qT > 0 ? d.q / qT : 0;
-      d.rev = P * d.q;
+    });
+    players.forEach(co => {
+      const d = co.div[seg.id];
+      d.rev = (d.share >= G.params.cap ? Preg : P) * d.q;
       d.opex = d.c * d.q;
       d.ebit = d.rev - d.opex - d.depT;
     });
@@ -516,13 +662,21 @@ var ENGINE = (function () {
     seg.hist.push({ t, D: seg.D, g: seg.g, P, r, u, S, n: players.length });
   }
 
-  function segPER(seg) {
+  function segTrend(seg) {
     const h = seg.hist;
     const n = Math.min(3, h.length);
     let g = 0;
     for (let i = h.length - n; i < h.length; i++) g += h[i].g;
-    g = n ? g / n : 0;
-    return clamp(11 + 280 * g, 10, 45) + (seg.perBonus || 0);
+    return n ? g / n : 0;
+  }
+  function segPER(seg) {
+    return clamp(11 + 280 * segTrend(seg), 10, 45) + (seg.perBonus || 0);
+  }
+  /* Valeur plancher d'une division, en fraction de ses actifs : le marché paie des
+     capacités installées dans un créneau qui croît, beaucoup moins dans un créneau qui décline. */
+  function assetFloor(G, seg) {
+    const p = G.params;
+    return clamp(p.floorBase + p.floorSlope * segTrend(seg), p.floorBase, 1.0);
   }
 
   function forecastGrowth(G, seg, t) {
@@ -545,17 +699,28 @@ var ENGINE = (function () {
   function loanTotal(P, rate, n) { return P + rate * P * (n + 1) / 2; }
 
   /* ---------- Valorisation ---------- */
-  function valuation(G, co, npRec) {
-    let rev = 0, w = 0, assets = 0;
+  /* Somme des parties : chaque division vaut PER du créneau × résultat opérationnel
+     normatif après impôt, sans descendre sous sa valeur plancher ; on ajoute la trésorerie et on
+     retranche la dette. Un euro en caisse vaut donc un euro, et un investissement de
+     conquête qui pèse sur les résultats n'est pas sanctionné au-delà de la décote des actifs. */
+  function valuation(G, co) {
+    const tax = G.params.tax;
+    let rev = 0, w = 0, assets = 0, ev = 0;
+    const parts = {};
     for (const sid in co.div) {
-      const d = co.div[sid], seg = segById(G, sid);
-      rev += d.rev || 0; w += (d.rev || 0) * segPER(seg); assets += d.A;
+      const d = co.div[sid], seg = segById(G, sid), per = segPER(seg);
+      rev += d.rev || 0; w += (d.rev || 0) * per; assets += d.A;
+      // résultat normatif : moyenne des deux derniers exercices, pour lisser les à-coups
+      const hh = d.hist || [], prev = hh.length >= 2 ? hh[hh.length - 2].ebit : d.ebit;
+      const ebitN = 0.5 * ((d.ebit || 0) + (prev || 0));
+      parts[sid] = Math.max(per * ebitN * (1 - tax), assetFloor(G, seg) * d.A);
+      ev += parts[sid];
     }
     const PER = rev > 0 ? w / rev : 10;
     const debt = co.loan ? co.loan.out : 0;
     const equity = assets + co.cash - debt;
-    const value = Math.max(PER * npRec, 0.5 * Math.max(0, equity));
-    return { PER, equity, value, assets, debt };
+    const value = Math.max(ev + co.cash - debt, 0.25 * Math.max(0, equity));
+    return { PER, equity, value, assets, debt, ev, parts };
   }
 
   /* ---------- Création d'une partie ---------- */
@@ -564,7 +729,7 @@ var ENGINE = (function () {
     const sc = scenarioById(scId);
     const seed = (opts.seed >>> 0) || ((Date.now() ^ 0x5bd1e995) >>> 0);
     const G = {
-      v: 1, sc: sc.id, title: sc.title, seed, rng: seed | 0,
+      v: VERSION, sc: sc.id, title: sc.title, seed, rng: seed | 0, rngAI: (seed ^ 0x9E3779B9) | 0,
       year: 0, T: opts.years || 15, startYear: sc.startYear || 2027,
       params: Object.assign({}, DEFAULT_PARAMS, sc.params || {}),
       segments: [], companies: [], listings: [], log: [], news: [],
@@ -624,13 +789,13 @@ var ENGINE = (function () {
       const ebt = ebit - interest + intInc;
       const tax = Math.max(0, ebt) * G.params.tax;
       const npRec = ebt - tax;
-      const val = valuation(G, co, npRec);
+      const val = valuation(G, co);
       co.shares = Math.max(1, val.value / 10);
       co.hist.push({
         t: 0, rev, ebit, dep, interest, intInc, tax, npRec, exc: 0, np: npRec, dividends: 0, inv: dep,
         cash: co.cash, debt: val.debt, equity: val.equity, assets: val.assets, value: val.value, PER: val.PER,
         price: val.value / co.shares, dps: 0, score: val.value / co.shares, shares: co.shares,
-        issue: 0, buyback: 0, ma: 0, payout: co.payout
+        issue: 0, buyback: 0, ma: 0, payout: co.payout, ev: val.ev, parts: val.parts
       });
     });
     genNews(G, 1);
@@ -681,9 +846,6 @@ var ENGINE = (function () {
       applyEvent(G, ev);
       G.news.push({ t, kind: ev.kind, text: ev.text });
     }
-    if (G.params.rate !== G.params.rate0 && !G.news.some(n => n.kind === "banque")) {
-      // rien : le taux courant est affiché dans le panneau de financement
-    }
     G.news.forEach(n => G.log.push(n));
   }
 
@@ -713,6 +875,7 @@ var ENGINE = (function () {
 
   /* ---------- IA des concurrents ---------- */
   function aiDecide(G, co) {
+    if (G.preview) return neutralDecision(G, co);
     const p = G.params, t = G.year + 1, k = p.ai || 1;
     const P = Object.assign({}, PERSONAS[co.persona]);
     P.aggr *= k; P.push *= k; P.entry = Math.min(0.9, P.entry * k); P.odUse *= k;
@@ -726,7 +889,7 @@ var ENGINE = (function () {
     G.listings.forEach(L => {
       if (L.seller === co.id) return;
       const seller = coById(G, L.seller);
-      if (!seller.alive) return;
+      if (!seller.alive && !L.liq) return;
       const ld = seller.div[L.seg];
       if (!ld) return;
       const seg = segById(G, L.seg);
@@ -735,13 +898,15 @@ var ENGINE = (function () {
       const gF = forecastGrowth(G, seg, t);
       const interest = own ? 1 : ((gF > 0.04 && P.entry > 0) ? 0.6 : (P.bidBoost ? 0.4 : 0));
       if (!interest) return;
-      const val = ld.A * (0.45 + 0.25 * interest + clamp(gF * 3, -0.15, 0.3) + (P.bidBoost || 0)) * (0.9 + 0.2 * rnd(G));
+      const val = ld.A * (0.45 + 0.25 * interest + clamp(gF * 3, -0.15, 0.3) + (P.bidBoost || 0)) * (0.9 + 0.2 * rnd(G, "rngAI"));
       const amt = Math.min(val, Math.max(0, co.cash - safety) * 0.6);
       if (amt > 0 && amt >= L.minPrice) { dec.bids[L.id] = Math.round(amt); free -= amt; }
     });
 
     const cf = (h.npRec > 0 ? h.npRec * (1 - dec.payout) : h.npRec) + h.dep - (co.loan ? co.loan.ann : 0);
-    let budget = free + cf;
+    // les profils expansionnistes ne misent qu'une partie du cash-flow attendu : un bon
+    // exercice ne se reproduit pas forcément, et leurs propres capacités pèsent sur les prix
+    let budget = free + (cf > 0 ? (P.cfUse || 1) * cf : cf);
 
     const wants = [];
     for (const sid in co.div) {
@@ -749,7 +914,7 @@ var ENGINE = (function () {
       if (G.listings.some(l => l.seller === co.id && l.seg === sid)) continue;
       const gF = 0.5 * seg.g + 0.5 * forecastGrowth(G, seg, t);
       if (d.lossYears >= P.exitPatience && d.rs < 0.7 && gF < 0.06 && t - d.entered > 4) {
-        if (d.unsold >= 1) dec.disinvest[sid] = Math.round(d.A);
+        if (d.unsold >= 1) dec.divest[sid] = { mode: "liq" };
         else dec.divest[sid] = { mode: "auction", min: Math.round(0.45 * d.A) };
         continue;
       }
@@ -773,7 +938,7 @@ var ENGINE = (function () {
       wants.push({ sid, inv: maint, pr: 3 });
       if (inv > maint) wants.push({ sid, inv: inv - maint, pr: d.rs >= 1 ? 2 : 1 });
     }
-    if (P.entry > 0 && t >= 2 && rnd(G) < P.entry) {
+    if (P.entry > 0 && t >= 2 && rnd(G, "rngAI") < P.entry) {
       const cands = G.segments.filter(s => !co.div[s.id] && forecastGrowth(G, s, t) > 0.05);
       if (cands.length) {
         cands.sort((a, b) => forecastGrowth(G, b, t) - forecastGrowth(G, a, t));
@@ -809,6 +974,47 @@ var ENGINE = (function () {
     return dec;
   }
 
+  /* ---------- Aperçu de l'exercice ----------
+     Hypothèses affichées au joueur : conjoncture sans aléa, concurrents qui investissent
+     ce qu'il faut pour garder leur part, sans entrée, cession ni rachat. L'aperçu ne révèle
+     donc ni l'aléa de demande ni les décisions réelles des concurrents. */
+  function neutralDecision(G, co) {
+    const dec = { invest: {}, disinvest: {}, divest: {}, payout: PERSONAS[co.persona] ? PERSONAS[co.persona].payout : 0.3, loan: null, issuePct: 0, buybackPct: 0, bids: {} };
+    for (const sid in co.div) dec.invest[sid] = investHints(G, co, sid).follow;
+    return dec;
+  }
+  function preview(G, playerDec) {
+    const H = JSON.parse(JSON.stringify(G));
+    H.preview = true;
+    H.segments.forEach(s => { s.vol = 0; });
+    H.listings = H.listings.filter(l => l.seller === H.companies.find(c => c.player).id);
+    const R = simulateYear(H, playerDec);
+    const co = H.companies.find(c => c.player);
+    return { G: H, R, co, h: lastH(co) };
+  }
+
+  /* ---------- Décomposition de la variation du cours ----------
+     Exacte : Δcours = Σ divisions Δvaleur / N₀ + Δtrésorerie nette / N₀ + effet du nombre
+     d'actions + reste (plancher de fonds propres). */
+  function priceBridge(co) {
+    const H = co.hist, n = H.length;
+    if (n < 2) return null;
+    const h1 = H[n - 1], h0 = H[n - 2], N0 = h0.shares, N1 = h1.shares;
+    if (!h1.parts || !h0.parts) return null;
+    const divs = {};
+    const ids = new Set(Object.keys(h0.parts).concat(Object.keys(h1.parts)));
+    ids.forEach(sid => { divs[sid] = ((h1.parts[sid] || 0) - (h0.parts[sid] || 0)) / N0; });
+    const flows = {
+      caf: (h1.npRec + h1.dep) / N0, inv: -h1.inv / N0, div: -h1.dividends / N0,
+      ma: ((h1.ma || 0) + (h1.disinv || 0)) / N0, capital: ((h1.issue || 0) - (h1.buyback || 0)) / N0
+    };
+    const nc0 = h0.cash - h0.debt, nc1 = h1.cash - h1.debt;
+    const V1 = h1.value;
+    const shares = V1 / N1 - V1 / N0;
+    const rest = (h1.price - h0.price) - (sum(Object.values(divs)) + (nc1 - nc0) / N0 + shares);
+    return { divs, flows, netCash: (nc1 - nc0) / N0, shares, rest, dPrice: h1.price - h0.price, dps: h1.dps, dScore: h1.score - h0.score };
+  }
+
   /* ---------- Nettoyage de la décision du joueur ---------- */
   function sanitize(G, co, dec) {
     dec = dec || {};
@@ -826,7 +1032,7 @@ var ENGINE = (function () {
     for (const sid in (dec.disinvest || {})) {
       const v = +dec.disinvest[sid];
       if (!co.div[sid] || !isFinite(v) || v <= 0 || out.divest[sid] || G.listings.some(l => l.seller === co.id && l.seg === sid)) continue;
-      out.disinvest[sid] = Math.min(v, co.div[sid].A);
+      out.disinvest[sid] = Math.min(v, G.params.maxDisinv * co.div[sid].A);
       delete out.invest[sid];
     }
     if (dec.loan && +dec.loan.amount > 0) out.loan = { amount: +dec.loan.amount, years: clamp(Math.round(+dec.loan.years || 5), 2, G.params.maxLoanYears) };
@@ -855,14 +1061,15 @@ var ENGINE = (function () {
     open.forEach(L => {
       const seller = coById(G, L.seller);
       const seg = segById(G, L.seg);
-      if (!seller.alive || !seller.div[L.seg]) return;
+      if ((!seller.alive && !L.liq) || !seller.div[L.seg]) return;
       const d = seller.div[L.seg];
+      const from = L.liq ? "le liquidateur de " + seller.name : seller.name;
       let best = null;
       alive.forEach(b => {
         if (b.id === L.seller) return;
         const amt = (decs[b.id].bids || {})[L.id];
         if (!(amt > 0)) return;
-        if (amt < L.minPrice) { if (b.player) R.notes.push("Votre offre sur « " + seg.name + " » (" + fmt(amt) + " M€) est inférieure au prix minimal fixé par " + seller.name + "."); return; }
+        if (amt < L.minPrice) { if (b.player) R.notes.push("Votre offre sur « " + seg.name + " » (" + fmt(amt) + " M€) est inférieure au prix minimal fixé par " + from + "."); return; }
         if (b.cash < amt) { if (b.player) R.notes.push("Offre sur « " + seg.name + " » annulée : trésorerie insuffisante au moment du règlement."); return; }
         const bd = b.div[L.seg];
         if ((bd ? bd.share : 0) + d.share > p.cap) { if (b.player) R.notes.push("L'autorité de la concurrence bloque votre rachat de « " + seg.name + " » : la part cumulée dépasserait " + pct(p.cap) + "."); return; }
@@ -870,14 +1077,17 @@ var ENGINE = (function () {
       });
       if (best) {
         const b = best.b, amt = best.amt;
-        seller.cash += amt; seller._exc += amt - d.A; seller._ma += amt; seller._sold[L.seg] = true;
+        if (!L.liq) { seller.cash += amt; seller._exc += amt - d.A; seller._ma += amt; seller._sold[L.seg] = true; }
         delete seller.div[L.seg];
         b.cash -= amt; b._ma -= amt;
         const bd = b.div[L.seg];
         if (bd) { bd.K += d.K; bd.A += d.A; bd.X += d.X; bd.share += d.share; }
         else b.div[L.seg] = { K: d.K, A: d.A, X: d.X, share: d.share, rs: d.rs, lossYears: 0, unsold: 0, depT: d.depT, inv: 0, entered: t, hist: [] };
         R.ma.push({ seg: seg.name, seller: seller.name, buyer: b.name, amt, A: d.A, player: seller.player || b.player });
-        G.log.push({ t, kind: "cession", text: b.name + " rachète « " + seg.name + " » à " + seller.name + " pour " + fmt(amt) + " M€ (actifs : " + fmt(d.A) + " M€)." });
+        G.log.push({ t, kind: "cession", text: b.name + " rachète « " + seg.name + " » à " + from + " pour " + fmt(amt) + " M€ (actifs : " + fmt(d.A) + " M€)." });
+      } else if (L.liq) {
+        delete seller.div[L.seg];
+        G.log.push({ t, kind: "cession", text: "Aucun repreneur pour « " + seg.name + " » de " + seller.name + " : les capacités sont démantelées." });
       } else {
         d.unsold = (d.unsold || 0) + 1;
         R.ma.push({ seg: seg.name, seller: seller.name, buyer: null, amt: 0, A: d.A, player: seller.player });
@@ -952,18 +1162,17 @@ var ENGINE = (function () {
           G.log.push({ t, kind: "entrée", text: co.name + " entre sur « " + seg.name + " » avec " + fmt(amount) + " M€ d'investissement." });
         }
         if (!d) return;
-        const dis = Math.min(d.A, Math.max(0, +((dc.disinvest || {})[seg.id] || 0)));
+        const disReq = Math.max(0, +((dc.disinvest || {})[seg.id] || 0));
+        const dis = Math.min(p.maxDisinv * d.A, disReq);
         if (dis > 0 && !G.listings.some(l => l.seller === co.id && l.seg === seg.id)) {
-          co.cash += dis; co._disinv += dis; amount = 0;
-          if (dis >= d.A - 0.5) {
-            co._sold[seg.id] = true;
-            delete co.div[seg.id];
-            G.log.push({ t, kind: "désinvestissement", text: co.name + " cède la totalité des actifs de « " + seg.name + " » (" + fmt(dis) + " M€) et quitte le créneau." });
-            if (co.player) R.notes.push("« " + seg.name + " » : actifs entièrement cédés pour " + fmt(dis) + " M€ ; vous quittez le créneau.");
-            return;
-          }
+          const got = disinvestRate(G, seg) * dis;
+          co.cash += got; co._disinv += got; co._exc -= dis - got; amount = 0;
           d.A -= dis;
-          G.log.push({ t, kind: "désinvestissement", text: co.name + " désinvestit " + fmt(dis) + " M€ d'actifs dans « " + seg.name + " »." });
+          G.log.push({ t, kind: "désinvestissement", text: co.name + " désinvestit " + fmt(dis) + " M€ d'actifs dans « " + seg.name + " » et en récupère " + fmt(got) + " M€." });
+          if (co.player) {
+            if (disReq > dis + 0.5) R.notes.push("« " + seg.name + " » : désinvestissement plafonné à " + pct(p.maxDisinv, 0) + " des actifs, soit " + fmt(dis) + " M€.");
+            R.notes.push("« " + seg.name + " » : " + fmt(dis) + " M€ d'actifs cédés pour " + fmt(got) + " M€, moins-value de " + fmt(dis - got) + " M€.");
+          }
         }
         const maint = seg.dep * d.A;
         if (co.player && amount > 0) G.pinv.push({ t, sid: seg.id, inv: amount, quad: quadrant(G, seg, d.share > 0 ? d.rs : 0, true), entry: d.entered === t });
@@ -1019,11 +1228,11 @@ var ENGINE = (function () {
         co.cash += co.pendingLoan.P0; co.loan = co.pendingLoan; co.pendingLoan = null;
         G.log.push({ t, kind: "banque", text: co.name + " obtient un emprunt de " + fmt(co.loan.P0) + " M€ sur " + co.loan.years + " ans à " + pct(co.loan.rate, 2) + "." });
       }
-      const val = valuation(G, co, npRec);
+      const val = valuation(G, co);
       let price = val.value / co.shares;
       const dps = dividends / co.shares;
       co.dps.push(dps);
-      let score = price + sum(co.dps) / co.dps.length;
+      let score = price + sum(co.dps);
       co.overdraft = p.overdraft * Math.max(rev, 0.5 * co.hist[0].rev);
       if (co.cash < -co.overdraft) {
         co.alive = false; co.bankrupt = t; price = 0; score = 0;
@@ -1034,14 +1243,20 @@ var ENGINE = (function () {
       co.hist.push({
         t, rev, ebit, dep, interest, intInc, tax, npRec, exc: co._exc, np, dividends, inv: co._inv,
         disinv: co._disinv, cash: co.cash, debt: val.debt, equity: val.equity, assets: val.assets, value: co.alive ? val.value : 0, PER: val.PER,
-        price, dps, score, shares: co.shares, issue: co._issue, buyback: co._buyback, ma: co._ma, payout: co.payoutUsed, repay
+        price, dps, score, shares: co.shares, issue: co._issue, buyback: co._buyback, ma: co._ma, payout: co.payoutUsed, repay,
+        ev: co.alive ? val.ev : 0, parts: co.alive ? val.parts : {}
       });
     });
-    // sociétés en faillite : capacités retirées du marché
+    // sociétés en faillite : capacités retirées du marché, divisions vendues par le liquidateur
+    // l'exercice suivant (prix minimal de 20 % des actifs), démantelées faute de repreneur
     G.companies.forEach(co => {
       if (!co.alive && co.bankrupt === t) {
-        co.div = {};
         G.listings = G.listings.filter(l => l.seller !== co.id);
+        for (const sid in co.div) {
+          const d = co.div[sid];
+          G.listings.push({ id: G.nextListingId++, seller: co.id, seg: sid, minPrice: Math.round(0.2 * d.A), t, liq: true });
+          G.log.push({ t, kind: "cession", text: "Le liquidateur de " + co.name + " met en vente « " + segById(G, sid).name + " » (prix minimal " + fmt(0.2 * d.A) + " M€)." });
+        }
       }
     });
     alive.forEach(co => { delete co._sold; });
@@ -1080,8 +1295,8 @@ var ENGINE = (function () {
   }
 
   return {
-    SCENARIOS, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
-    forecastGrowth, quadrant, segPER, segById, coById, lastH, valuation, pathGrowth, unitCost, fmt, pct, clamp, sum, sanitize
+    VERSION, SCENARIOS, disinvestRate, aiDecide, preview, priceBridge, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
+    forecastGrowth, quadrant, segPER, assetFloor, segById, coById, lastH, valuation, pathGrowth, unitCost, fmt, pct, clamp, sum, sanitize
   };
 })();
 
@@ -1093,10 +1308,13 @@ var ENGINE = (function () {
   const E = ENGINE;
   const fmt = E.fmt, pct = E.pct, clamp = E.clamp;
   const app = document.getElementById("app");
-  const SAVE_KEY = "leconseil.partie.v1";
+  const SAVE_KEY = "leconseil.partie.v2";
   const SHORT = { emb: "Emballages", mac: "Machines-outils", cmp: "Composants", bat: "Batteries", pmt: "Pièces thermiques", cap: "Capteurs", med: "Médical",
     gvfr: "GV France", gvde: "GV Allemagne", gves: "GV Espagne", gvit: "GV Italie", icfr: "IC France", icde: "IC Allemagne", icsud: "IC Sud", car: "Autocars",
-    mfr: "Meubles FR", mde: "Meubles DACH", msud: "Meubles Sud", muk: "Meubles UK", co2: "Centrales CO₂", hfc: "Vitrines HFC", srv: "Services", chf: "Chambres froides" };
+    mfr: "Meubles FR", mde: "Meubles DACH", msud: "Meubles Sud", muk: "Meubles UK", co2: "Centrales CO₂", hfc: "Vitrines HFC", srv: "Services", chf: "Chambres froides",
+    cth: "Citadines therm.", sth: "SUV therm.", utl: "Utilitaires", cve: "Compactes VE", sve: "SUV VE", btr: "Batteries", apv: "Après-vente", logi: "Logiciel",
+    itg: "Intégration", hw: "Serveurs", cld: "Cloud", csv: "Cloud souverain", saas: "SaaS", cyb: "Cybersécurité", puce: "Puces IA",
+    cvx: "Cardiologie", gen: "Génériques", otc: "Grand public", vac: "Vaccins", onco: "Oncologie", bios: "Biosimilaires", thg: "Thérapies géniques" };
   const QUAD = { vedette: "Vedette", vache: "Vache à lait", dilemme: "Dilemme", poids: "Poids mort" };
   const TABS = [
     ["conseil", "Séance du conseil"], ["divisions", "Divisions"], ["marches", "Marchés"], ["matrice", "Matrice BCG"],
@@ -1133,10 +1351,14 @@ var ENGINE = (function () {
 
   /* ---------------- sauvegarde ---------------- */
   function save() {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ G: S.G, draft: S.draft, q: S.q, sel: S.sel })); } catch (e) { /* stockage indisponible */ }
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ G: S.G, draft: S.draft, q: S.q, sel: S.sel, deadline: S.deadline })); } catch (e) { /* stockage indisponible */ }
   }
   function loadSaved() {
-    try { const s = localStorage.getItem(SAVE_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; }
+    try {
+      const s = localStorage.getItem(SAVE_KEY);
+      const sv = s ? JSON.parse(s) : null;
+      return sv && sv.G && sv.G.v === E.VERSION ? sv : null;
+    } catch (e) { return null; }
   }
   function clearSaved() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* rien */ } }
 
@@ -1151,6 +1373,10 @@ var ENGINE = (function () {
     return d;
   }
 
+  // montant d'actifs effectivement cédés et trésorerie récupérée pour une demande donnée
+  function disAssets(co, sid, v) { return Math.min(Math.max(0, v), S.G.params.maxDisinv * co.div[sid].A); }
+  function disCash(co, sid, v) { return E.disinvestRate(S.G, segOf(sid)) * disAssets(co, sid, v); }
+
   function hasListing(co, sid) { return S.G.listings.some(l => l.seller === co.id && l.seg === sid); }
 
   function estimate() {
@@ -1163,7 +1389,7 @@ var ENGINE = (function () {
     }
     for (const lid in d.bids) bids += +d.bids[lid] || 0;
     let dis = 0;
-    for (const sid in (d.disinvest || {})) if (co.div[sid]) dis += Math.min(+d.disinvest[sid] || 0, co.div[sid].A);
+    for (const sid in (d.disinvest || {})) if (co.div[sid]) dis += disCash(co, sid, +d.disinvest[sid] || 0);
     const issue = d.issuePct > 0 ? co.shares * d.issuePct * h.price * (1 - p.issueDisc) : 0;
     const buy = d.buybackPct > 0 ? co.shares * d.buybackPct * h.price * 1.05 : 0;
     const divEst = d.payout * Math.max(0, h.npRec);
@@ -1173,18 +1399,29 @@ var ENGINE = (function () {
     const loanIn = d.loan ? Math.min(+d.loan.amount || 0, ml) : 0;
     const end = cash + loanIn;
     const limit = p.overdraft * Math.max(h.rev, 0.5 * co.hist[0].rev);
-    const lvl = end < -limit ? "bad" : end < 0 ? "warn" : "good";
-    return { inv, dis, end, limit, lvl, divEst, issue, buy, loanIn, ml };
+    // l'aperçu simule l'exercice ; à défaut, estimation comptable sur le résultat de l'an dernier
+    const pv = runPreview();
+    const endP = pv ? pv.h.cash : end;
+    const lvl = pv ? (!pv.co.alive ? "bad" : endP < 0 ? "warn" : "good") : (end < -limit ? "bad" : end < 0 ? "warn" : "good");
+    return { inv, dis, end: endP, limit, lvl, divEst, issue, buy, loanIn, ml, pv };
+  }
+  function runPreview() {
+    try {
+      const dec = JSON.parse(JSON.stringify(S.draft));
+      if (dec.loan && !(dec.loan.amount > 0)) dec.loan = null;
+      return E.preview(S.G, dec);
+    } catch (e) { return null; }
   }
 
   /* ---------------- graphiques SVG ---------------- */
   function niceTicks(min, max, n) {
     if (!isFinite(min) || !isFinite(max)) return [0, 1];
-    if (min === max) { max = min + 1; min = min - 1; }
+    // écart nul ou réduit à un arrondi flottant : élargir, sinon le pas passe sous la précision
+    if (max - min < 1e-9 * Math.max(1, Math.abs(max))) { max = max + 1; min = min - 1; }
     const span = max - min, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
     const step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(s => span / s <= n) || 10 * mag;
     const t = [];
-    for (let v = Math.floor(min / step) * step; v <= max + step * 0.001; v += step) t.push(+v.toFixed(10));
+    for (let v = Math.floor(min / step) * step, i = 0; v <= max + step * 0.001 && i < 50; v += step, i++) t.push(+v.toFixed(10));
     if (t[t.length - 1] < max) t.push(t[t.length - 1] + step);
     return t;
   }
@@ -1231,16 +1468,16 @@ var ENGINE = (function () {
     const items = [];
     for (const sid in co.div) {
       const d = co.div[sid], seg = segOf(sid);
-      items.push({ seg, d, rs: clamp(d.share > 0 ? d.rs : 0.1, 0.1, 10), g: seg.g, rev: d.rev || 0 });
+      items.push({ seg, d, rs: clamp(d.share > 0 ? d.rs : 0.1, 0.1, 10), g: E.forecastGrowth(G, seg, G.year + 1), rev: d.rev || 0 });
     }
-    const gs = G.segments.map(s => s.g).concat([G.params.bcgG]);
+    const gs = G.segments.map(s => E.forecastGrowth(G, s, G.year + 1)).concat([G.params.bcgG]);
     let gmin = Math.min(-0.05, ...gs) - 0.02, gmax = Math.max(0.15, ...gs) + 0.02;
     const yt = niceTicks(gmin * 100, gmax * 100, 6);
     gmin = yt[0] / 100; gmax = yt[yt.length - 1] / 100;
     const lx = v => Math.log10(v);
     const X = rs => ml + (1 - (lx(rs) + 1) / 2) * (W - ml - mr);
     const Y = g => mt + (1 - (g - gmin) / (gmax - gmin)) * (H - mt - mb);
-    const maxRev = Math.max(1, ...G.companies.flatMap(c => Object.values(c.div).map(d => d.rev || 0)));
+    const maxRev = Math.max(1, ...G.companies.filter(c => c.alive).flatMap(c => Object.values(c.div).map(d => d.rev || 0)));
     let s = "";
     s += `<rect x="${ml}" y="${mt}" width="${X(1) - ml}" height="${Y(G.params.bcgG) - mt}" fill="var(--good)" opacity="0.06"/>`;
     s += `<rect x="${X(1)}" y="${Y(G.params.bcgG)}" width="${W - mr - X(1)}" height="${H - mb - Y(G.params.bcgG)}" fill="var(--bad)" opacity="0.06"/>`;
@@ -1336,7 +1573,7 @@ var ENGINE = (function () {
         <span class="eyebrow">${esc(s.kicker)}</span>
         <h3>${esc(s.title)}</h3>
         <p class="small">${esc(s.pitch)}</p>
-        <span class="chips"><span class="chip">${s.segments.length} créneaux</span><span class="chip">4 concurrents</span><span class="chip">Seuil antitrust ${pct(s.params.cap, 0)}</span></span>
+        <span class="chips">${s.difficulty ? `<span class="chip on">${esc(s.difficulty)}</span>` : ""}<span class="chip">${s.segments.length} créneaux</span><span class="chip">4 concurrents</span><span class="chip">Seuil antitrust ${pct(s.params.cap, 0)}</span></span>
       </button>`).join("")}</div>
   </section>
   <section class="section">
@@ -1374,7 +1611,7 @@ var ENGINE = (function () {
     <span>Dette<b>${M(co.loan ? co.loan.out : 0)}</b></span><span>Taux directeur<b>${pct(G.params.rate, 1)}</b></span><span>Rang<b>${rankOf(co)}/${G.companies.length}</b></span>
     ${S.sel.timer && !over ? `<span>Temps<b class="timer" id="timer">—</b></span>` : ""}
   </div>
-  <nav class="tabs" role="tablist" aria-label="Rubriques">${tabs.map(([id, l]) => `<button class="tab" role="tab" id="tab-${id}" aria-selected="${S.tab === id}" data-act="tab" data-tab="${id}">${l}</button>`).join("")}</nav>
+  <nav class="tabs" role="tablist" aria-label="Rubriques">${tabs.map(([id, l]) => `<button class="tab" role="tab" id="tab-${id}" aria-selected="${S.tab === id}" aria-controls="panel" tabindex="${S.tab === id ? 0 : -1}" data-act="tab" data-tab="${id}">${l}</button>`).join("")}</nav>
 </div></div>
 <main class="wrap" id="panel" role="tabpanel" aria-labelledby="tab-${S.tab}">${renderTab()}</main>
 ${over ? `<div class="footer-bar"><div class="wrap"><div class="sum"><span>Partie terminée. Score final <b>${fmt(h.score, 2)}</b>.</span></div><div class="row"><button class="btn ghost" data-act="replay">Rejouer cette graine</button><button class="btn primary" data-act="new">Nouvelle partie</button></div></div></div>`
@@ -1447,6 +1684,7 @@ ${S.result ? renderSheet() : ""}`;
     const dis = (dr.disinvest || {})[sid] || 0;
     const canDis = !listed && !dv.mode;
     const dq = (f, label) => `<button type="button" data-act="dq" data-sid="${sid}" data-f="${f}">${label} <span class="num">${fmt(f * d.A)}</span></button>`;
+    const dRate = E.disinvestRate(G, seg);
     const dominant = d.share >= p.cap;
     const qb = (k, label, v) => `<button type="button" class="${S.q[sid] === k ? "on" : ""}" data-act="q" data-sid="${sid}" data-k="${k}" data-v="${v}">${label} <span class="num">${fmt(v)}</span></button>`;
     return `
@@ -1465,8 +1703,9 @@ ${S.result ? renderSheet() : ""}`;
   <div class="inv">
     <div class="inv-line"><label for="inv-${sid}">Investissement de l'exercice</label><input id="inv-${sid}" type="number" min="0" step="1" inputmode="decimal" data-k="inv" data-sid="${sid}" value="${Math.round(cur)}" ${dv.mode === "liq" || dis > 0 ? "disabled" : ""}></div>
     <div class="quick">${qb("zero", "Rien", 0)}${qb("maint", "Maintien", hint.maint)}${qb("follow", "Suivre le marché", hint.follow)}${qb("plus5", "+5 pts de part", hint.plus5)}</div>
-    ${canDis ? `<div class="inv-line"><label for="dis-${sid}">Désinvestir (actifs cédés, M€)</label><input id="dis-${sid}" type="number" min="0" max="${Math.floor(d.A)}" step="1" inputmode="decimal" data-k="dis" data-sid="${sid}" value="${Math.round(dis)}"></div>
-    <div class="quick">${dq(0.25, "25 %")}${dq(0.5, "50 %")}${dq(1, "Tout")}${dis > 0 ? `<button type="button" data-act="dq" data-sid="${sid}" data-f="0">Annuler</button>` : ""}</div>` : ""}
+    ${canDis ? `<div class="inv-line"><label for="dis-${sid}">Désinvestir (actifs cédés, M€)</label><input id="dis-${sid}" type="number" min="0" max="${Math.floor(p.maxDisinv * d.A)}" step="1" inputmode="decimal" data-k="dis" data-sid="${sid}" value="${Math.round(dis)}"></div>
+    <div class="quick">${dq(0.25, "25 %")}${dq(p.maxDisinv, "Maximum " + pct(p.maxDisinv, 0))}${dis > 0 ? `<button type="button" data-act="dq" data-sid="${sid}" data-f="0">Annuler</button>` : ""}</div>
+    <p class="small muted">Actifs repris à ${pct(dRate, 0)} de leur valeur${dRate < p.disRecov ? " (décote aggravée par la surcapacité du créneau)" : ""}.</p>` : ""}
     <p class="effect" id="eff-${sid}"></p>
   </div>
   ${listed ? "" : `<div class="dv">
@@ -1498,7 +1737,7 @@ ${S.result ? renderSheet() : ""}`;
     return `<div class="panel">
   <div class="slider-head"><label for="payout"><b>Dividende</b></label><b id="payout-v">${pct(d.payout, 0)}</b></div>
   <input id="payout" type="range" min="0" max="100" step="5" value="${Math.round(d.payout * 100)}" data-k="payout">
-  <p class="small muted">Part du résultat net courant de l'exercice versée aux actionnaires. Le dividende moyen par action entre dans le score ; ce qui n'est pas distribué finance la croissance.</p>
+  <p class="small muted">Part du résultat net courant de l'exercice versée aux actionnaires. Les dividendes cumulés entrent dans le score à hauteur de ce qu'ils retirent de la trésorerie : distribuer n'est payant que si l'argent ne trouve pas de meilleur emploi.</p>
   <div class="kv"><span>Dividende indicatif (sur RN ${yearOf(S.G.year)})</span><span class="num" id="payout-amt"></span></div>
 </div>`;
   }
@@ -1535,13 +1774,13 @@ ${S.result ? renderSheet() : ""}`;
   <div class="slider-head"><label for="buyback">Rachat d'actions</label><b id="buyback-v">${pct(d.buybackPct, 0)}</b></div>
   <input id="buyback" type="range" min="0" max="${Math.round(p.maxBuyback * 100)}" step="1" value="${Math.round(d.buybackPct * 100)}" data-k="buyback">
   <div class="kv"><span>Coût (prime de 5 %)</span><span class="num" id="buyback-amt"></span></div>
-  <p class="small muted">L'émission apporte du cash immédiatement mais dilue le cours. Le rachat n'a de sens que si la trésorerie excède durablement les besoins d'investissement. Cours de référence : ${EUR(h.price)} · ${fmt(co.shares, 1)} M d'actions.</p></div>`;
+  <p class="small muted">L'émission apporte du cash immédiatement mais dilue le cours (décote). Le rachat coûte une prime : il ne crée pas de valeur, il rend de la trésorerie sans utilité. Cours de référence : ${EUR(h.price)} · ${fmt(co.shares, 1)} M d'actions.</p></div>`;
   }
 
   function listingsBlock(co) {
     const G = S.G, p = G.params;
     const mine = G.listings.filter(l => l.seller === co.id);
-    const theirs = G.listings.filter(l => l.seller !== co.id && E.coById(G, l.seller).alive && E.coById(G, l.seller).div[l.seg]);
+    const theirs = G.listings.filter(l => l.seller !== co.id && (E.coById(G, l.seller).alive || l.liq) && E.coById(G, l.seller).div[l.seg]);
     let html = "";
     mine.forEach(l => { html += `<div class="news-item"><div class="eyebrow">Votre cession</div><p>« ${esc(segOf(l.seg).name)} » est en vente avec un prix minimal de ${M(l.minPrice)}. Résultat à la clôture.</p></div>`; });
     if (!theirs.length) html += `<p class="muted small">Aucune division concurrente n'est à vendre actuellement.</p>`;
@@ -1551,7 +1790,7 @@ ${S.result ? renderSheet() : ""}`;
       const comb = (own ? own.share : 0) + d.share;
       const blocked = comb > p.cap;
       const margin = d.rev > 0 ? d.ebit / d.rev : 0;
-      return `<article class="seg-card"><header><h3>${esc(seg.name)}</h3><span class="chip">${esc(seller.name)}</span></header>
+      return `<article class="seg-card"><header><h3>${esc(seg.name)}</h3><span class="chip">${l.liq ? "Liquidation · " : ""}${esc(seller.name)}</span></header>
         <dl class="facts"><div><dt>Part</dt><dd>${pct(d.share)}</dd></div><div><dt>Marge op.</dt><dd class="${margin < 0 ? "bad" : ""}">${pct(margin)}</dd></div><div><dt>Actifs</dt><dd>${M(d.A)}</dd></div>
         <div><dt>Prix minimal</dt><dd>${M(l.minPrice)}</dd></div><div><dt>Croissance</dt><dd>${pct(seg.g)}</dd></div><div><dt>Part cumulée</dt><dd class="${blocked ? "bad" : ""}">${pct(comb)}</dd></div></dl>
         ${blocked ? `<p class="small bad">Rachat interdit : la part cumulée dépasserait le seuil de ${pct(p.cap, 0)}.</p>` : `<div class="inv-line"><label for="bid-${l.id}">Votre offre (M€)</label><input id="bid-${l.id}" type="number" min="0" step="1" inputmode="decimal" data-k="bid" data-lid="${l.id}" value="${Math.round(S.draft.bids[l.id] || 0)}"></div>
@@ -1571,16 +1810,18 @@ ${S.result ? renderSheet() : ""}`;
   function updateDerived() {
     const G = S.G, co = player(), h = lastH(co), d = S.draft, p = G.params;
     if (!d) return;
+    const est = estimate();
     // effets par division
     for (const sid in co.div) {
       const dv = co.div[sid], seg = segOf(sid);
-      const dis = Math.min(dv.A, +((d.disinvest || {})[sid]) || 0);
+      const dis = disAssets(co, sid, +((d.disinvest || {})[sid]) || 0);
       const inv = dis > 0 ? 0 : (+d.invest[sid] || 0);
       const K1 = ((dv.A - dis) * (1 - seg.dep) + inv) / seg.capex;
-      if (dis >= dv.A - 0.5) { setText("eff-" + sid, `Cession totale : ${M(dis)} récupérés, vous quittez le créneau.`); continue; }
       const share = K1 / Math.max(1e-9, seg.S - dv.K + K1);
       const c = E.unitCost(G, co, seg);
-      setText("eff-" + sid, (dis > 0 ? `Trésorerie récupérée ${M(dis)} · ` : "") + `Capacité ${fmt(dv.K)} → ${fmt(K1)} (${sign(K1 / Math.max(1e-9, dv.K) - 1, x => pct(x, 0))}) · part potentielle ≈ ${pct(share, 0)} · coût unitaire ${fmt(c, 3)} pour un prix de ${fmt(seg.P, 3)}`);
+      const pd = est.pv && est.pv.co.div[sid];
+      const outlook = pd && pd.rev > 0 ? `aperçu : part ${pct(pd.share, 0)}, marge ${pct(pd.ebit / pd.rev, 0)}` : `part potentielle ≈ ${pct(share, 0)}`;
+      setText("eff-" + sid, (dis > 0 ? `Trésorerie récupérée ${M(disCash(co, sid, dis))} (moins-value ${M(dis - disCash(co, sid, dis))}) · ` : "") + `Capacité ${fmt(dv.K)} → ${fmt(K1)} (${sign(K1 / Math.max(1e-9, dv.K) - 1, x => pct(x, 0))}) · ${outlook} · coût unitaire ${fmt(c, 3)} pour un prix de ${fmt(seg.P, 3)}`);
     }
     setText("payout-v", pct(d.payout, 0));
     setText("payout-amt", M(d.payout * Math.max(0, h.npRec)));
@@ -1594,13 +1835,12 @@ ${S.result ? renderSheet() : ""}`;
         setText("loan-tot", M(E.loanTotal(amt, r, yrs)) + " sur " + yrs + " ans");
       } else { setText("loan-rate", pct(E.loanRate(G, co, Math.max(1, ml * 0.5)), 2) + " (indicatif)"); setText("loan-tot", "—"); }
     }
-    const est = estimate();
     setText("issue-v", pct(d.issuePct, 0)); setText("issue-amt", M(est.issue));
     setText("buyback-v", pct(d.buybackPct, 0)); setText("buyback-amt", M(est.buy));
     const sum = document.getElementById("sum");
     if (sum) {
       const msg = est.lvl === "bad" ? "Risque de cessation de paiements" : est.lvl === "warn" ? "Découvert utilisé" : "Trésorerie positive";
-      sum.innerHTML = `<span>Investissements <b>${M(est.inv)}</b></span>${est.dis > 0 ? `<span>Désinvestissements <b>${M(est.dis)}</b></span>` : ""}<span><i class="sig ${est.lvl === "good" ? "" : est.lvl}"></i>Trésorerie fin ${yearOf(G.year + 1)} estimée <b class="${est.lvl === "good" ? "" : est.lvl}">${M(est.end)}</b></span><span class="muted">${msg} · découvert autorisé ${M(est.limit)}</span>`;
+      sum.innerHTML = `<span>Investissements <b>${M(est.inv)}</b></span>${est.dis > 0 ? `<span>Désinvestissements <b>${M(est.dis)}</b></span>` : ""}<span><i class="sig ${est.lvl === "good" ? "" : est.lvl}"></i>Trésorerie fin ${yearOf(G.year + 1)} estimée <b class="${est.lvl === "good" ? "" : est.lvl}">${M(est.end)}</b></span>${est.pv && est.pv.co.alive ? `<span title="Aperçu : conjoncture sans aléa, concurrents qui investissent au rythme de leur marché">Cours estimé <b>${EUR(est.pv.h.price)}</b></span>` : ""}<span class="muted">${msg} · découvert autorisé ${M(est.limit)} · aperçu sans aléa, concurrents au rythme du marché</span>`;
     }
     const btn = document.getElementById("validate");
     if (btn) btn.textContent = S.confirmRisk ? "Confirmer malgré le risque" : "Valider l'exercice " + yearOf(G.year + 1);
@@ -1655,13 +1895,13 @@ ${S.result ? renderSheet() : ""}`;
     if (!co || !co.alive) { co = player(); S.matrixCo = co.id; }
     const rows = Object.keys(co.div).map(sid => {
       const d = co.div[sid], seg = segOf(sid);
-      return `<tr><td><i class="dot" style="background:${co.color}"></i>${esc(seg.name)}</td><td>${fmt(d.rs, 2)}×</td><td>${pct(seg.g)}</td><td>${M(d.rev)}</td><td>${QUAD[E.quadrant(G, seg, d.rs, false)]}</td></tr>`;
+      return `<tr><td><i class="dot" style="background:${co.color}"></i>${esc(seg.name)}</td><td>${fmt(d.rs, 2)}×</td><td>${pct(E.forecastGrowth(G, seg, G.year + 1))}</td><td>${M(d.rev)}</td><td>${QUAD[quadOf(co, sid)]}</td></tr>`;
     }).join("");
     return `<section class="section"><div class="section-head"><h2>Matrice part de marché / croissance</h2><span class="muted small">Exercice ${yearOf(G.year)} · taille des bulles proportionnelle au CA</span></div>
 <div class="co-pick" role="group" aria-label="Société affichée">${G.companies.filter(c => c.alive).map(c => `<button data-act="mco" data-id="${c.id}" aria-pressed="${c.id === co.id}"><i class="dot" style="background:${c.color}"></i>${esc(c.name)}</button>`).join("")}</div>
 <div class="matrix-panel">${bcgChart(co)}</div>
-<div class="tbl-wrap"><table><thead><tr><th>Division</th><th>Part relative</th><th>Croissance</th><th>CA</th><th>Position</th></tr></thead><tbody>${rows}</tbody></table></div>
-<p class="small muted">Seuil de croissance : ${pct(G.params.bcgG, 0)}. Les vedettes demandent du cash pour suivre le marché ; les vaches à lait en dégagent ; les dilemmes exigent un choix entre investir massivement ou sortir ; les poids morts consomment des ressources sans perspective.</p></section>`;
+<div class="tbl-wrap"><table><thead><tr><th>Division</th><th>Part relative</th><th>Croissance prévue</th><th>CA</th><th>Position</th></tr></thead><tbody>${rows}</tbody></table></div>
+<p class="small muted">Ordonnée : croissance prévue pour le prochain exercice ; seuil ${pct(G.params.bcgG, 0)}. Les vedettes demandent du cash pour suivre le marché ; les vaches à lait en dégagent ; les dilemmes exigent un choix entre investir massivement ou sortir ; les poids morts consomment des ressources sans perspective.</p></section>`;
   }
 
   /* ---------------- Comptes ---------------- */
@@ -1693,12 +1933,12 @@ ${S.result ? renderSheet() : ""}`;
     const list = G.companies.slice().sort((a, b) => lastH(b).score - lastH(a).score);
     const rows = list.map((c, i) => {
       const h = lastH(c), m = h.rev ? h.ebit / h.rev : 0, de = h.equity > 0 ? h.debt / h.equity : 0;
-      return `<tr class="${c.player ? "me" : ""} ${c.alive ? "" : "dead"}"><td>${i + 1}. <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</td><td>${fmt(h.score, 2)}</td><td>${EUR(h.price)}</td><td>${EUR(E.sum(c.dps) / Math.max(1, c.dps.length))}</td>
-      <td>${M(h.rev)}</td><td class="${h.npRec < 0 ? "bad" : ""}">${M(h.npRec)}</td><td>${pct(m)}</td><td>${M(h.cash)}</td><td>${fmt(de, 2)}</td><td>${Object.keys(c.div).length}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
+      return `<tr class="${c.player ? "me" : ""} ${c.alive ? "" : "dead"}"><td>${i + 1}. <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</td><td>${fmt(h.score, 2)}</td><td>${EUR(h.price)}</td><td>${EUR(E.sum(c.dps))}</td>
+      <td>${M(h.rev)}</td><td class="${h.npRec < 0 ? "bad" : ""}">${M(h.npRec)}</td><td>${pct(m)}</td><td>${M(h.cash)}</td><td>${fmt(de, 2)}</td><td>${c.alive ? Object.keys(c.div).length : 0}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
     }).join("");
     const chart = lineChart(G.companies.map(c => ({ label: c.name.split(" ")[0], color: c.color, w: c.player ? 2.8 : 1.6, pts: c.hist.map(x => [yearOf(x.t), x.score]) })), { aria: "Évolution des scores", h: 260, fy: v => fmt(v, 0) });
-    return `<section class="section"><div class="section-head"><h2>Classement</h2><span class="muted small">Score = cours + dividende moyen par action</span></div>
-<div class="tbl-wrap"><table><thead><tr><th>Société</th><th>Score</th><th>Cours</th><th>Div. moyen</th><th>CA</th><th>RN courant</th><th>Marge op.</th><th>Trésorerie</th><th>Dette / FP</th><th>Divisions</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    return `<section class="section"><div class="section-head"><h2>Classement</h2><span class="muted small">Score = cours + dividendes cumulés par action</span></div>
+<div class="tbl-wrap"><table><thead><tr><th>Société</th><th>Score</th><th>Cours</th><th>Div. cumulés</th><th>CA</th><th>RN courant</th><th>Marge op.</th><th>Trésorerie</th><th>Dette / FP</th><th>Divisions</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
 <div class="panel">${chart}</div>
 <p class="small muted">Les concurrents sont pilotés par des stratégies différentes, révélées au bilan final. Observez leurs investissements dans l'onglet Marchés pour anticiper les surcapacités.</p></section>`;
   }
@@ -1713,13 +1953,13 @@ ${S.result ? renderSheet() : ""}`;
 
   /* ---------------- Règles ---------------- */
   function tabRegles() {
-    const p = S.G ? S.G.params : { cap: 0.55, overdraft: 0.12, maxDE: 1.5, ebitdaMult: 3, maxDil: 0.2, maxBuyback: 0.1, recov: 0.4, issueDisc: 0.1 };
+    const p = S.G ? S.G.params : { cap: 0.55, overdraft: 0.12, maxDE: 1.5, ebitdaMult: 3, maxDil: 0.2, maxBuyback: 0.1, recov: 0.4, issueDisc: 0.1, disRecov: 0.75, disFloor: 0.5, maxDisinv: 0.5 };
     return `<section class="rules">
 <div><h2>Règles du jeu</h2><p class="muted">Le modèle est volontairement simple : il illustre des mécanismes de stratégie, il ne prétend pas reproduire un marché réel.</p></div>
-<div><h3>Objectif et score</h3><p>Chaque exercice, le score de chaque société vaut son cours de bourse plus le dividende moyen par action versé depuis le premier exercice. Toutes les sociétés démarrent à 10,00 €.</p>
-<p class="formula">score = cours + dividende moyen par action</p>
-<p class="formula">cours = valeur ÷ nombre d'actions · valeur = PER × résultat net courant</p>
-<p>Le PER d'une société est la moyenne, pondérée par le chiffre d'affaires, du PER de ses créneaux : de 10 à 45 selon la croissance des trois derniers exercices, avec une prime pour certains métiers peu cycliques. Si le résultat est faible ou négatif, la valeur ne descend pas sous la moitié des fonds propres. Les plus-values ou moins-values de cession n'entrent pas dans la valorisation.</p></div>
+<div><h3>Objectif et score</h3><p>Chaque exercice, le score de chaque société vaut son cours de bourse plus les dividendes par action versés depuis le premier exercice : c'est ce qu'a gagné un actionnaire présent depuis le début. Toutes les sociétés démarrent à 10,00 €.</p>
+<p class="formula">score = cours + dividendes cumulés par action</p>
+<p class="formula">valeur = Σ divisions max(PER × résultat opérationnel normatif après impôt ; plancher × actifs) + trésorerie − dette</p>
+<p>Le marché valorise chaque division séparément. Son PER va de 10 à 45 selon la croissance du créneau sur les trois derniers exercices, avec une prime pour certains métiers peu cycliques. Le résultat normatif est la moyenne des deux derniers exercices. Une division peu ou pas rentable vaut au moins une fraction de ses actifs : de 40 % dans un créneau stagnant ou en déclin à 100 % dans un créneau en forte croissance, car des capacités installées sur un marché porteur ont une valeur même avant d'être rentables. La trésorerie compte pour sa valeur, la dette en moins : distribuer ou thésauriser ne change pas le score, investir le change selon ce que l'investissement rapporte. Cours = valeur ÷ nombre d'actions.</p></div>
 <div><h3>Marchés et prix</h3><ul>
 <li>Chaque créneau suit un cycle de vie (émergence, croissance, maturité, déclin), perturbé par la conjoncture et des événements annoncés en début d'exercice.</li>
 <li>La capacité d'une division vaut ses actifs divisés par l'intensité capitalistique du créneau. Les actifs s'usent de 5 à 15 % par an : sans investissement, la capacité décroît.</li>
@@ -1731,12 +1971,13 @@ ${S.result ? renderSheet() : ""}`;
 <li><b>Dividende</b> : part du résultat net courant distribuée.</li>
 <li><b>Emprunt</b> : une ligne à la fois, plafonnée à ${fmt(p.ebitdaMult)} × EBITDA et ${fmt(p.maxDE, 1)} × fonds propres. Taux = taux directeur + 1,5 point + prime de levier. Fonds versés à la clôture, remboursement linéaire.</li>
 <li><b>Capital</b> : augmentation jusqu'à ${pct(p.maxDil, 0)} des actions par an, avec une décote de ${pct(p.issueDisc, 0)} ; rachat jusqu'à ${pct(p.maxBuyback, 0)}, avec une prime de 5 %.</li>
-<li><b>Désinvestissement</b> : cession d'une partie ou de la totalité des actifs d'une division, récupérée à leur valeur comptable dans l'exercice. La capacité baisse d'autant, l'expérience acquise est conservée. Utile pour retirer du capital d'un créneau peu porteur et le réinvestir ailleurs.</li>
+<li><b>Désinvestissement</b> : cession d'une partie des actifs d'une division, au plus ${pct(p.maxDisinv, 0)} par exercice, reprise à ${pct(p.disRecov, 0)} de sa valeur comptable (jusqu'à ${pct(p.disFloor, 0)} seulement quand le créneau est en surcapacité). La moins-value passe en résultat exceptionnel. La capacité baisse d'autant, l'expérience acquise est conservée. Pour sortir d'un coup, il faut vendre ou fermer la division.</li>
 <li><b>Cessions de division</b> : mise en vente avec un prix minimal (offres examinées l'année suivante) ou fermeture immédiate qui récupère ${pct(p.recov, 0)} de la valeur des actifs.</li>
 <li><b>Acquisitions</b> : offres sur les divisions mises en vente par les concurrents. La division achetée fusionne avec la vôtre, actifs et expérience compris.</li></ul></div>
 <div><h3>Régulation et risques</h3><ul>
-<li>Au-delà du seuil de position dominante (${pct(p.cap, 0)} ici), l'investissement d'une division est limité au maintien de ses actifs, et tout rachat qui ferait franchir ce seuil est interdit.</li>
+<li>Au-delà du seuil de position dominante (${pct(p.cap, 0)} ici), l'investissement d'une division est limité au maintien de ses actifs, tout rachat qui ferait franchir ce seuil est interdit, et ses tarifs sont régulés : en pénurie, elle vend au prix d'équilibre, sans la hausse dont profitent ses concurrents.</li>
 <li>Le banquier accorde un découvert d'environ ${pct(p.overdraft, 0)} du chiffre d'affaires. Si la trésorerie de clôture passe en dessous, la société est en cessation de paiements : la partie s'arrête.</li>
+<li>Une société en faillite quitte le marché ; le liquidateur met ses divisions en vente l'exercice suivant, au prix minimal de 20 % de leurs actifs. Sans repreneur, les capacités sont démantelées.</li>
 <li>La banque centrale fait évoluer son taux directeur ; les emprunts en cours restent à taux fixe.</li></ul></div>
 <div><h3>Concurrents</h3><p>Quatre sociétés pilotées par l'ordinateur, chacune avec sa propre philosophie (défense du métier, conquête de parts, rente, diversification, opportunisme). Elles réagissent aux pénuries, aux surcapacités et aux mises en vente. Leurs profils sont révélés à la fin de la partie.</p></div>
 <div><h3>Lire la matrice</h3><p>En abscisse, la part de marché relative (votre part divisée par celle du premier concurrent ; 1 = égalité avec le leader). En ordonnée, la croissance du créneau. Elle sert à équilibrer le portefeuille : les vaches à lait financent les vedettes et les dilemmes que l'on a choisi de transformer en vedettes.</p></div>
@@ -1758,7 +1999,7 @@ ${S.result ? renderSheet() : ""}`;
     const rows = list.map((c, i) => {
       const hh = lastH(c);
       const prof = c.player ? "Vous" : (E.PERSONAS[c.persona] ? E.PERSONAS[c.persona].label : "");
-      return `<tr class="${c.player ? "me" : ""} ${c.alive ? "" : "dead"}"><td>${i + 1}. <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</td><td style="text-align:left">${esc(prof)}</td><td>${fmt(hh.score, 2)}</td><td>${EUR(hh.price)}</td><td>${EUR(E.sum(c.dps) / Math.max(1, c.dps.length))}</td><td>${M(hh.rev)}</td><td>${M(hh.npRec)}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
+      return `<tr class="${c.player ? "me" : ""} ${c.alive ? "" : "dead"}"><td>${i + 1}. <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</td><td style="text-align:left">${esc(prof)}</td><td>${fmt(hh.score, 2)}</td><td>${EUR(hh.price)}</td><td>${EUR(E.sum(c.dps))}</td><td>${M(hh.rev)}</td><td>${M(hh.npRec)}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
     }).join("");
     const byQ = { vedette: 0, vache: 0, dilemme: 0, poids: 0 };
     let entries = 0;
@@ -1770,7 +2011,7 @@ ${S.result ? renderSheet() : ""}`;
     return `<section class="section podium">
   <div><div class="eyebrow">Assemblée générale de clôture · ${esc(G.title)} · graine ${G.seed}</div><p class="verdict">${verdict}</p></div>
   <div class="statgrid">${stat("Score final", fmt(h.score, 2))}${stat("Rendement total pour l'actionnaire", pct(tsr, 0), tsr < 0 ? "bad" : "good")}${stat("Rendement annuel moyen", pct(cagr, 1), cagr < 0 ? "bad" : "")}${stat("Chiffre d'affaires final", M(h.rev))}${stat("Résultat net courant final", M(h.npRec), h.npRec < 0 ? "bad" : "")}${stat("Dette finale", M(h.debt))}</div>
-  <div class="tbl-wrap"><table><thead><tr><th>Société</th><th style="text-align:left">Profil</th><th>Score</th><th>Cours</th><th>Div. moyen</th><th>CA final</th><th>RN final</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="tbl-wrap"><table><thead><tr><th>Société</th><th style="text-align:left">Profil</th><th>Score</th><th>Cours</th><th>Div. cumulés</th><th>CA final</th><th>RN final</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   <div class="panel">${chart}</div>
   <div class="fin-grid">
     <div class="panel"><b>Où sont allés vos investissements</b>${qbar}<p class="small muted">Position de la division au moment de chaque décision. Total investi : ${M(totInv)} ; ${entries} entrée${entries > 1 ? "s" : ""} sur un nouveau créneau, ${exits} sortie${exits > 1 ? "s" : ""}.</p></div>
@@ -1780,6 +2021,24 @@ ${S.result ? renderSheet() : ""}`;
   }
 
   /* ---------------- Feuille de résultats ---------------- */
+  function bridgeBlock(co) {
+    const b = E.priceBridge(co);
+    if (!b) return "";
+    const eu = x => sign(x, v => fmt(v, 2)) + " €";
+    const line = (k, v, sub) => `<div class="kv ${sub ? "sub" : ""}"><span>${k}</span><span class="num ${v < -0.005 ? "bad" : v > 0.005 ? "good" : ""}">${eu(v)}</span></div>`;
+    const divs = Object.keys(b.divs).map(sid => [segOf(sid).name, b.divs[sid]]).filter(x => Math.abs(x[1]) >= 0.005).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]));
+    const f = b.flows;
+    const cash = [["Autofinancement", f.caf], ["Investissements", f.inv], ["Dividendes versés", f.div], ["Cessions et acquisitions", f.ma], ["Capital (émission − rachat)", f.capital]].filter(x => Math.abs(x[1]) >= 0.005);
+    return `<details class="bridge"><summary><b>Pourquoi le score a bougé</b> <span class="muted small">par action</span></summary>
+  <div class="bridge-body">
+    ${line("Valeur des divisions", E.sum(divs, x => x[1]))}${divs.map(x => line(esc(x[0]), x[1], true)).join("")}
+    ${line("Trésorerie nette", b.netCash)}${cash.map(x => line(x[0], x[1], true)).join("")}
+    ${Math.abs(b.shares) >= 0.005 ? line("Nombre d'actions", b.shares) : ""}${Math.abs(b.rest) >= 0.005 ? line("Plancher de valorisation (fonds propres)", b.rest) : ""}
+    ${line("Dividende de l'exercice", b.dps)}
+    <div class="kv total"><span>Variation du score</span><span class="num">${eu(b.dScore)}</span></div>
+    <p class="small muted">Investir fait baisser la trésorerie nette tout de suite ; la valeur des divisions ne suit que si l'investissement rapporte. Emprunter ne change pas la trésorerie nette.</p>
+  </div></details>`;
+  }
   function renderSheet() {
     const G = S.G, R = S.result, co = player();
     const h = lastH(co), h0 = co.hist[co.hist.length - 2] || h;
@@ -1787,7 +2046,7 @@ ${S.result ? renderSheet() : ""}`;
     const rk = R.ranking;
     const pos = rk.findIndex(x => x.player) + 1;
     const ma = R.ma.filter(m => m.player).map(m => m.buyer ? `${m.buyer} rachète « ${m.seg} » à ${m.seller} pour ${M(m.amt)}.` : null).filter(Boolean);
-    const notes = R.notes.concat(ma).concat(R.bankrupt.filter(n => n !== co.name).map(n => `${n} fait faillite : ses capacités quittent le marché.`));
+    const notes = R.notes.concat(ma).concat(R.bankrupt.filter(n => n !== co.name).map(n => `${n} fait faillite : ses capacités quittent le marché et ses divisions seront vendues par le liquidateur.`));
     const nextNews = !G.over ? G.news : [];
     const bankrupt = G.bankrupt;
     return `<div class="sheet-back"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rs-title">
@@ -1798,6 +2057,7 @@ ${S.result ? renderSheet() : ""}`;
     <div><div class="muted small">Rang</div><div class="big-score" style="font-size:1.8rem">${pos}<span class="muted" style="font-size:1rem">/${rk.length}</span></div></div>
   </div>
   <div class="statgrid">${stat("Chiffre d'affaires", M(h.rev))}${stat("Résultat opérationnel", M(h.ebit), h.ebit < 0 ? "bad" : "")}${stat("Résultat net", M(h.np), h.np < 0 ? "bad" : "")}${stat("Dividendes", M(h.dividends))}${stat("Investissements", M(h.inv))}${stat("Trésorerie", M(h.cash), h.cash < 0 ? "bad" : "")}${stat("Dette", M(h.debt))}${stat("Cours", EUR(h.price))}</div>
+  ${bankrupt ? "" : bridgeBlock(co)}
   ${notes.length ? `<div><b>À noter</b><ul class="notes">${notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}
   <div><b>Classement</b><div class="rank-list">${rk.map((x, i) => { const c = E.coById(G, x.id); return `<div class="rank-row ${x.player ? "me" : ""}"><span>${i + 1}.</span><span><i class="dot" style="background:${c.color}"></i>${esc(x.name)}${x.alive ? "" : ' <span class="bad small">faillite</span>'}</span><span class="num">${fmt(x.score, 2)}</span></div>`; }).join("")}</div></div>
   ${nextNews.length ? `<div><b>À l'ordre du jour de ${yearOf(G.year + 1)}</b><div class="news" style="margin-top:6px">${nextNews.map(n => `<div class="news-item"><div class="eyebrow">${esc(n.kind)}</div><p>${esc(n.text)}</p></div>`).join("")}</div></div>` : ""}
@@ -1809,6 +2069,7 @@ ${S.result ? renderSheet() : ""}`;
      ACTIONS
      ================================================================ */
   function startGame(opts) {
+    clearInterval(timerH); timerH = null;
     const seed = opts.seed ? (Math.abs(parseInt(opts.seed, 10)) >>> 0) || 1 : ((Math.random() * 4294967295) >>> 0) || 7;
     S.G = E.newGame(opts.scenario, { seed, years: opts.years, playerName: (opts.name || "").trim() || undefined });
     S.draft = freshDraft();
@@ -1820,14 +2081,35 @@ ${S.result ? renderSheet() : ""}`;
   }
   function openYear() { S.deadline = S.sel.timer ? Date.now() + S.sel.timer * 1000 : 0; }
 
+  /* Temps écoulé sur une décision qui mène à la cessation de paiements : le directeur
+     financier annule les offres de rachat puis réduit les investissements au prorata. */
+  function cfoTrim() {
+    const d = S.draft, notes = [];
+    if (Object.keys(d.bids).some(k => d.bids[k] > 0)) { d.bids = {}; notes.push("annulé vos offres de rachat"); }
+    const est = estimate();
+    if (est.lvl === "bad" && est.inv > 0) {
+      // plus grande fraction des investissements qui laisse, dans l'aperçu, une trésorerie positive
+      const base = Object.assign({}, d.invest);
+      const apply = k => { for (const sid in base) d.invest[sid] = Math.floor((+base[sid] || 0) * k); };
+      const safe = k => { apply(k); const e = estimate(); return e.lvl !== "bad" && e.end >= 0; };
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (safe(mid)) lo = mid; else hi = mid; }
+      apply(lo);
+      notes.push("réduit les investissements de " + pct(1 - lo, 0));
+    }
+    return notes.length ? "Temps écoulé : pour éviter la cessation de paiements, le directeur financier a " + notes.join(" et ") + "." : null;
+  }
+
   function validate(force) {
     if (!S.G || S.G.over || S.result) return;
     const est = estimate();
     if (est.lvl === "bad" && !S.confirmRisk && !force) { S.confirmRisk = true; updateDerived(); return; }
+    const cfo = force && est.lvl === "bad" ? cfoTrim() : null;
     const dec = JSON.parse(JSON.stringify(S.draft));
     if (dec.loan && !(dec.loan.amount > 0)) dec.loan = null;
     const R = E.simulateYear(S.G, dec);
-    S.result = R; S.stampFx = true;
+    if (cfo) R.notes.unshift(cfo);
+    S.result = R; S.stampFx = true; S.deadline = 0;
     if (!S.G.over) S.draft = freshDraft();
     save();
     render();
@@ -1852,8 +2134,24 @@ ${S.result ? renderSheet() : ""}`;
     timerH = setInterval(upd, 1000);
   }
 
+  /* Le rendu remplace tout le DOM : on retrouve l'élément qui avait le focus (par son id,
+     sinon par ses attributs data-*) pour le lui rendre, curseur compris. */
+  function focusKey(el) {
+    if (!el || el === document.body || !app.contains(el)) return null;
+    if (el.id) return "#" + CSS.escape(el.id);
+    const attrs = ["act", "sid", "k", "f", "id", "tab", "lid"].filter(a => el.dataset[a] != null);
+    return attrs.length ? attrs.map(a => `[data-${a}="${CSS.escape(el.dataset[a])}"]`).join("") : null;
+  }
   function render() {
+    const a = document.activeElement, key = focusKey(a);
+    const caret = a && typeof a.selectionStart === "number" && a.type === "text" ? a.selectionStart : null;
     if (!S.G) renderHome(); else renderGame();
+    if (S.result) return; // la feuille de résultats prend le focus
+    const el = key && app.querySelector(key);
+    if (el) {
+      el.focus({ preventScroll: true });
+      if (caret != null && typeof el.setSelectionRange === "function") try { el.setSelectionRange(caret, caret); } catch (e) { /* champ sans sélection */ }
+    }
   }
 
   app.addEventListener("click", ev => {
@@ -1864,7 +2162,12 @@ ${S.result ? renderSheet() : ""}`;
     if (act === "start") { startGame(S.sel); return; }
     if (act === "resume") {
       const sv = loadSaved();
-      if (sv && sv.G) { S.G = sv.G; S.draft = sv.draft || freshDraft(); S.draft.disinvest = S.draft.disinvest || {}; S.q = sv.q || {}; S.sel = Object.assign(S.sel, sv.sel || {}); S.result = null; S.tab = "conseil"; openYear(); render(); }
+      if (sv && sv.G) {
+        S.G = sv.G; S.draft = sv.draft || freshDraft(); S.draft.disinvest = S.draft.disinvest || {}; S.q = sv.q || {}; S.sel = Object.assign(S.sel, sv.sel || {}); S.result = null; S.tab = "conseil";
+        // recharger la page ne remet pas le chronomètre à zéro (30 s de grâce si l'échéance est passée)
+        if (S.sel.timer && sv.deadline) S.deadline = Math.max(sv.deadline, Date.now() + 30000); else openYear();
+        render();
+      }
       return;
     }
     if (act === "discard") { clearSaved(); renderHome(); return; }
@@ -1875,7 +2178,7 @@ ${S.result ? renderSheet() : ""}`;
     if (act === "close-sheet") {
       S.result = null;
       if (S.G.over) S.tab = "bilan"; else openYear();
-      render(); window.scrollTo(0, 0); return;
+      save(); render(); window.scrollTo(0, 0); return;
     }
     if (act === "new") { clearSaved(); S.G = null; S.result = null; render(); window.scrollTo(0, 0); return; }
     if (act === "replay") {
@@ -1919,7 +2222,7 @@ ${S.result ? renderSheet() : ""}`;
     else if (k === "dis") {
       const sid = el.dataset.sid, A = player().div[sid].A;
       d.disinvest = d.disinvest || {};
-      if (v > 0) { d.disinvest[sid] = Math.min(v, A); d.invest[sid] = 0; S.q[sid] = "zero"; } else delete d.disinvest[sid];
+      if (v > 0) { d.disinvest[sid] = Math.min(v, S.G.params.maxDisinv * A); d.invest[sid] = 0; S.q[sid] = "zero"; } else delete d.disinvest[sid];
       const inp = document.getElementById("inv-" + sid);
       if (inp) { inp.disabled = v > 0; if (v > 0) inp.value = 0; }
     }
@@ -1948,22 +2251,34 @@ ${S.result ? renderSheet() : ""}`;
   app.addEventListener("change", ev => { if (ev.target.tagName === "SELECT") onField(ev); });
 
   window.addEventListener("resize", () => { if (!S.G) drawGuilloche(); });
+  document.addEventListener("keydown", ev => {
+    if (S.result) {
+      if (ev.key === "Escape") { const b = document.getElementById("close-sheet"); if (b) b.click(); return; }
+      if (ev.key === "Tab") { // le focus reste dans la feuille de résultats
+        const sheet = document.querySelector(".sheet");
+        const f = sheet ? Array.from(sheet.querySelectorAll("button, [href], input, select, [tabindex]:not([tabindex='-1'])")) : [];
+        if (!f.length) return;
+        const i = f.indexOf(document.activeElement);
+        if (ev.shiftKey && i <= 0) { ev.preventDefault(); f[f.length - 1].focus(); }
+        else if (!ev.shiftKey && (i === -1 || i === f.length - 1)) { ev.preventDefault(); f[0].focus(); }
+      }
+      return;
+    }
+    // onglets : flèches, Début, Fin (motif ARIA tablist)
+    const t = ev.target;
+    if (t && t.classList && t.classList.contains("tab") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(ev.key)) {
+      const tabs = Array.from(app.querySelectorAll(".tab"));
+      const i = tabs.indexOf(t);
+      const j = ev.key === "Home" ? 0 : ev.key === "End" ? tabs.length - 1 : (i + (ev.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      ev.preventDefault();
+      S.tab = tabs[j].dataset.tab; render();
+      const nt = document.getElementById("tab-" + S.tab);
+      if (nt) { nt.focus(); nt.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+    }
+  });
 
   /* ---------------- démarrage ---------------- */
-  function snapshot() { return { G: S.G, draft: S.draft, q: S.q, tab: S.tab, sel: S.sel, result: S.result, matrixCo: S.matrixCo }; }
-  function start(data) {
-    data = data || {};
-    if (data.G) {
-      Object.assign(S, { G: data.G, draft: data.draft, q: data.q || {}, tab: data.tab || "conseil", sel: Object.assign(S.sel, data.sel || {}), result: data.result || null, matrixCo: data.matrixCo || "P" });
-      if (!S.draft && !S.G.over) S.draft = freshDraft();
-      if (S.draft && !S.draft.disinvest) S.draft.disinvest = {};
-      openYear();
-    }
-    render();
-  }
-  try { if (window.claude && window.claude.hot && window.claude.hot.snapshot) window.claude.hot.snapshot(snapshot); } catch (e) { /* hors visionneuse */ }
-  const hot = window.claude && window.claude.hot;
-  if (hot && hot.ready) hot.ready(start); else start(hot && hot.data ? hot.data : {});
+  render();
 })();
 
 </script>

@@ -7,9 +7,14 @@ var ENGINE = (function () {
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
   const sum = (arr, f) => arr.reduce((s, x) => s + (f ? f(x) : x), 0);
 
-  /* ---------- Aléa reproductible (mulberry32, état dans G) ---------- */
-  function rnd(G) {
-    let a = (G.rng = (G.rng + 0x6D2B79F5) | 0);
+  /* ---------- Aléa reproductible (mulberry32, état dans G) ----------
+     Deux flux indépendants : G.rng pour la conjoncture (demande, événements, taux),
+     G.rngAI pour les décisions des concurrents. Le nombre de tirages du premier ne
+     dépend jamais des décisions : une même graine rejoue la même conjoncture. */
+  const VERSION = 2;
+  function rnd(G, key) {
+    key = key || "rng";
+    let a = (G[key] = (G[key] + 0x6D2B79F5) | 0);
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -47,7 +52,7 @@ var ENGINE = (function () {
       desc: "Cherche la part de marché dans les créneaux en croissance, finance par dette et augmentations de capital.",
       payout: 0.12, aggr: 1.0, push: 0.55, harvestG: -0.02, harvestRS: 0.35, util: 0.95,
       debt: true, equity: true, entry: 0.30, entryShare: 0.12, odUse: 0.45, exitPatience: 4,
-      buyback: false, flexDiv: true, loanYears: 8
+      buyback: false, flexDiv: true, loanYears: 8, cfUse: 0.7
     },
     rentier: {
       label: "Rentier",
@@ -61,7 +66,7 @@ var ENGINE = (function () {
       desc: "Multiplie les entrées dans les créneaux nouveaux, au risque de la dispersion.",
       payout: 0.30, aggr: 0.55, push: 0.3, harvestG: 0.0, harvestRS: 0.5, util: 0.96,
       debt: true, equity: false, entry: 0.45, entryShare: 0.10, odUse: 0.15, exitPatience: 3,
-      buyback: false, flexDiv: true, loanYears: 7
+      buyback: false, flexDiv: true, loanYears: 7, cfUse: 0.85
     },
     opportuniste: {
       label: "Opportuniste",
@@ -76,6 +81,7 @@ var ENGINE = (function () {
   const SCENARIOS = [
     {
       id: "industrie",
+      difficulty: "Intermédiaire",
       title: "Groupe industriel diversifié",
       kicker: "Portefeuille hétérogène",
       pitch: "Vous présidez un groupe présent dans sept métiers, du carton d'emballage aux batteries stationnaires. Votre vache à lait, les pièces de moteurs thermiques, est condamnée à terme. Il faut choisir où concentrer les ressources avant qu'elle ne s'épuise.",
@@ -111,6 +117,7 @@ var ENGINE = (function () {
     },
     {
       id: "transport",
+      difficulty: "Intermédiaire",
       title: "Transport terrestre longue distance",
       kicker: "Challenger face aux opérateurs historiques",
       pitch: "Leader européen de l'autocar, vous pouvez entrer sur la grande vitesse ferroviaire que l'ouverture à la concurrence rend accessible. Les opérateurs historiques ont l'expérience et les moyens ; le régulateur leur interdit en revanche de renforcer leurs monopoles.",
@@ -124,13 +131,13 @@ var ENGINE = (function () {
         { id: "D", name: "Rotaia", color: "#7A5AA6", persona: "conquerant", cash: 0.10, debt: 0.40, debtYears: 7 }
       ],
       segments: [
-        { id: "gvfr", name: "Grande vitesse France", group: "rail", D0: 900, path: [[0, 0.03], [20, 0.025]], capex: 2.4, slope: 0.85, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.35,
+        { id: "gvfr", name: "Grande vitesse France", group: "rail", D0: 900, path: [[0, 0.03], [20, 0.025]], capex: 2.4, slope: 0.90, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.8,
           pos: { A: 0.85, D: 0.15 } },
-        { id: "gvde", name: "Grande vitesse Allemagne", group: "rail", D0: 700, path: [[0, 0.04], [20, 0.03]], capex: 2.4, slope: 0.85, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.35,
+        { id: "gvde", name: "Grande vitesse Allemagne", group: "rail", D0: 700, path: [[0, 0.04], [20, 0.03]], capex: 2.4, slope: 0.90, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.8,
           pos: { B: 0.90, A: 0.10 } },
-        { id: "gves", name: "Grande vitesse Espagne", group: "rail", D0: 450, path: [[0, 0.09], [8, 0.06], [20, 0.035]], capex: 2.4, slope: 0.84, mu: 0.25, eps: 1.4, dep: 0.05, vol: 0.012, H: 8, entryX: 0.40,
+        { id: "gves", name: "Grande vitesse Espagne", group: "rail", D0: 450, path: [[0, 0.09], [8, 0.06], [20, 0.035]], capex: 2.4, slope: 0.90, mu: 0.25, eps: 1.4, dep: 0.05, vol: 0.012, H: 8, entryX: 0.8,
           pos: { C: 0.60, A: 0.20, D: 0.20 } },
-        { id: "gvit", name: "Grande vitesse Italie", group: "rail", D0: 500, path: [[0, 0.05], [20, 0.035]], capex: 2.4, slope: 0.85, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.35,
+        { id: "gvit", name: "Grande vitesse Italie", group: "rail", D0: 500, path: [[0, 0.05], [20, 0.035]], capex: 2.4, slope: 0.90, mu: 0.24, eps: 1.4, dep: 0.05, vol: 0.010, H: 10, entryX: 0.8,
           pos: { D: 0.72, A: 0.28 } },
         { id: "icfr", name: "Intercités France", group: "rail", D0: 400, path: [[0, -0.02], [20, -0.03]], capex: 1.6, slope: 0.88, mu: 0.20, eps: 1.3, dep: 0.06, vol: 0.010, H: 12,
           pos: { A: 0.90, P: 0.10 } },
@@ -150,6 +157,7 @@ var ENGINE = (function () {
     },
     {
       id: "froid",
+      difficulty: "Difficile",
       title: "Froid commercial européen",
       kicker: "Leader national face à la transition des fluides",
       pitch: "Leader français du meuble frigorifique, vous êtes présent partout en Europe mais rarement en tête. La réglementation sur les fluides frigorigènes condamne les vitrines HFC et fait exploser les centrales CO₂ transcritiques, où un concurrent nordique a pris de l'avance. Les services, peu capitalistiques, sont valorisés par le marché.",
@@ -184,6 +192,122 @@ var ENGINE = (function () {
         { t: 4, text: "Révision du règlement F-gaz : interdiction anticipée des HFC dans les vitrines neuves. Les centrales CO₂ deviennent la norme.",
           gShift: { hfc: -0.06, co2: 0.03 } }
       ]
+    },
+    {
+      id: "auto",
+      difficulty: "Difficile",
+      title: "Automobile européenne",
+      kicker: "Financer la bascule électrique",
+      pitch: "Généraliste européen, vous dominez les citadines thermiques, les utilitaires et l'après-vente. Ces métiers financent le groupe mais l'interdiction programmée des moteurs thermiques les condamne. Un constructeur asiatique a pris de l'avance sur l'électrique et les batteries. Il faut décider quoi exploiter, quoi abandonner et où investir pendant qu'il reste du cash.",
+      startYear: 2027,
+      params: { cap: 0.55, rate: 0.030, overdraft: 0.12 },
+      companies: [
+        { id: "P", name: "Valmont Automobiles", color: "#C8432B", player: true, cash: 0.08, debt: 0.30, debtYears: 6, payout: 0.30 },
+        { id: "A", name: "Hartwig Motoren", color: "#2F6E96", persona: "gardien", cash: 0.10, debt: 0.20, debtYears: 6 },
+        { id: "B", name: "Kaishan Motors", color: "#7A5AA6", persona: "conquerant", cash: 0.10, debt: 0.25, debtYears: 7 },
+        { id: "C", name: "Ostrava Auto", color: "#A88328", persona: "rentier", cash: 0.10 },
+        { id: "D", name: "Aldren Mobility", color: "#2E8A6A", persona: "diversifieur", cash: 0.08, debt: 0.15, debtYears: 5 }
+      ],
+      segments: [
+        { id: "cth", name: "Citadines thermiques", group: "thermique", D0: 700, path: [[0, -0.03], [5, -0.07], [10, -0.12], [20, -0.12]], capex: 0.9, slope: 0.85, mu: 0.20, eps: 1.6, dep: 0.08, vol: 0.012,
+          pos: { P: 0.40, C: 0.35, A: 0.10, D: 0.15 } },
+        { id: "sth", name: "Berlines et SUV thermiques", group: "thermique", D0: 900, path: [[0, -0.01], [5, -0.05], [10, -0.10], [20, -0.10]], capex: 1.0, slope: 0.85, mu: 0.26, eps: 1.5, dep: 0.08, vol: 0.012,
+          pos: { A: 0.45, P: 0.20, C: 0.20, D: 0.15 } },
+        { id: "utl", name: "Utilitaires légers", group: "thermique", D0: 400, path: [[0, 0.02], [10, 0.0], [20, -0.03]], capex: 0.9, slope: 0.85, mu: 0.22, eps: 1.5, dep: 0.08, vol: 0.012,
+          pos: { P: 0.40, C: 0.30, A: 0.30 } },
+        { id: "cve", name: "Compactes électriques", group: "electrique", D0: 250, path: [[0, 0.20], [6, 0.15], [12, 0.08], [20, 0.04]], capex: 1.3, slope: 0.78, mu: 0.24, eps: 1.7, dep: 0.10, vol: 0.020, entryX: 0.5,
+          pos: { B: 0.45, D: 0.25, P: 0.15, A: 0.15 } },
+        { id: "sve", name: "SUV électriques", group: "electrique", D0: 300, path: [[0, 0.16], [6, 0.12], [12, 0.07], [20, 0.04]], capex: 1.4, slope: 0.80, mu: 0.28, eps: 1.6, dep: 0.10, vol: 0.020, entryX: 0.5,
+          pos: { A: 0.40, B: 0.35, D: 0.25 } },
+        { id: "btr", name: "Batteries de traction", group: "batterie", D0: 200, path: [[0, 0.22], [6, 0.15], [12, 0.07], [20, 0.04]], capex: 1.6, slope: 0.72, mu: 0.26, eps: 1.8, dep: 0.10, vol: 0.025, entryX: 0.4,
+          pos: { B: 0.70, D: 0.30 } },
+        { id: "apv", name: "Pièces et après-vente", group: "service", D0: 350, path: [[0, 0.03], [20, 0.01]], capex: 0.5, slope: 0.88, mu: 0.32, eps: 1.3, dep: 0.10, vol: 0.008, perBonus: 4,
+          pos: { P: 0.30, A: 0.30, C: 0.25, D: 0.15 } },
+        { id: "logi", name: "Logiciel et services connectés", group: "logiciel", D0: 80, path: [[0, 0.18], [8, 0.12], [20, 0.06]], capex: 0.4, slope: 0.70, mu: 0.38, eps: 1.4, dep: 0.20, vol: 0.030, perBonus: 3, entryX: 0.5,
+          pos: { D: 0.40, A: 0.30, B: 0.15, P: 0.15 } }
+      ],
+      scripted: [
+        { t: 4, text: "L'Union confirme la fin des ventes de voitures thermiques neuves et durcit les normes intermédiaires : la demande thermique recule plus vite, l'électrique accélère.",
+          gShift: { cth: -0.03, sth: -0.03, utl: -0.02, cve: 0.02, sve: 0.02, btr: 0.02 } },
+        { t: 7, text: "Effondrement du prix du lithium : le coût des batteries baisse de 15 %, celui des véhicules électriques de 8 % cette année.",
+          cost: { btr: 0.85, cve: 0.92, sve: 0.92 } }
+      ]
+    },
+    {
+      id: "numerique",
+      difficulty: "Intermédiaire",
+      title: "Numérique et cloud",
+      kicker: "Services informatiques face aux plateformes",
+      pitch: "Champion européen de l'intégration et de l'infogérance, vous êtes rentable mais faiblement valorisé : ces métiers croissent peu et le marché les paie mal. Les logiciels et la cybersécurité valent bien plus, le cloud est verrouillé par une plateforme américaine, et les puces pour l'intelligence artificielle s'arrachent. Reste à savoir si cet engouement va durer.",
+      startYear: 2027,
+      params: { cap: 0.60, rate: 0.030, overdraft: 0.12 },
+      companies: [
+        { id: "P", name: "Sorevia", color: "#C8432B", player: true, cash: 0.10, debt: 0.20, debtYears: 5, payout: 0.30 },
+        { id: "A", name: "Kalder Systems", color: "#2F6E96", persona: "gardien", cash: 0.10, debt: 0.15, debtYears: 6 },
+        { id: "B", name: "Northgate Cloud", color: "#7A5AA6", persona: "conquerant", cash: 0.12, debt: 0.20, debtYears: 7 },
+        { id: "C", name: "Marbeck Data", color: "#A88328", persona: "opportuniste", cash: 0.08, debt: 0.20, debtYears: 6 },
+        { id: "D", name: "Ilios Tech", color: "#2E8A6A", persona: "diversifieur", cash: 0.09, debt: 0.10, debtYears: 5 }
+      ],
+      segments: [
+        { id: "itg", name: "Intégration et infogérance", group: "service", D0: 700, path: [[0, 0.02], [20, 0.01]], capex: 0.3, slope: 0.93, mu: 0.14, eps: 1.4, dep: 0.15, vol: 0.010,
+          pos: { P: 0.40, C: 0.25, A: 0.20, D: 0.15 } },
+        { id: "hw", name: "Serveurs et stockage", group: "materiel", D0: 500, path: [[0, 0.03], [20, 0.01]], capex: 0.9, slope: 0.82, mu: 0.22, eps: 1.6, dep: 0.10, vol: 0.012,
+          pos: { A: 0.45, P: 0.20, C: 0.20, D: 0.15 } },
+        { id: "cld", name: "Cloud d'infrastructure", group: "cloud", D0: 400, path: [[0, 0.18], [8, 0.12], [20, 0.06]], capex: 1.8, slope: 0.74, mu: 0.30, eps: 1.6, dep: 0.12, vol: 0.015, entryX: 0.4,
+          pos: { B: 0.60, A: 0.25, D: 0.15 } },
+        { id: "csv", name: "Cloud souverain", group: "cloud", D0: 60, path: [[0, 0.12], [20, 0.08]], capex: 1.6, slope: 0.78, mu: 0.30, eps: 1.5, dep: 0.12, vol: 0.020, entryX: 0.5, perBonus: 2,
+          pos: { C: 0.50, P: 0.25, D: 0.25 } },
+        { id: "saas", name: "Logiciels d'entreprise", group: "logiciel", D0: 300, path: [[0, 0.12], [10, 0.09], [20, 0.05]], capex: 0.4, slope: 0.72, mu: 0.34, eps: 1.3, dep: 0.20, vol: 0.015, perBonus: 5, entryX: 0.5,
+          pos: { A: 0.35, D: 0.30, B: 0.20, P: 0.15 } },
+        { id: "cyb", name: "Cybersécurité", group: "logiciel", D0: 150, path: [[0, 0.15], [10, 0.11], [20, 0.07]], capex: 0.4, slope: 0.75, mu: 0.36, eps: 1.3, dep: 0.20, vol: 0.015, perBonus: 6, entryX: 0.5,
+          pos: { D: 0.40, C: 0.35, A: 0.25 } },
+        { id: "puce", name: "Puces pour l'intelligence artificielle", group: "puce", D0: 150, path: [[0, 0.30], [4, 0.25], [8, 0.10], [20, 0.05]], capex: 2.0, slope: 0.70, mu: 0.34, eps: 2.0, dep: 0.14, vol: 0.040, entryX: 0.3,
+          pos: { B: 0.55, A: 0.45 } }
+      ],
+      scripted: [
+        { t: 3, text: "Règlement européen sur la souveraineté des données : la commande publique et les secteurs régulés doivent recourir à un cloud hébergé et opéré en Europe.",
+          gShift: { csv: 0.06 } },
+        { t: 8, text: "Les centres de données ont surinvesti : les commandes de puces pour l'intelligence artificielle s'effondrent cette année et la croissance du créneau ne retrouvera pas son rythme.",
+          g: { puce: -0.20 }, gShift: { puce: -0.08 } }
+      ]
+    },
+    {
+      id: "pharma",
+      difficulty: "Difficile",
+      title: "Laboratoire pharmaceutique",
+      kicker: "Préparer la falaise des brevets",
+      pitch: "Votre laboratoire vit de sa franchise cardiovasculaire, très rentable, et de la santé grand public. Les brevets des molécules phares expirent dans quelques exercices : les génériques prendront alors l'essentiel du marché. L'oncologie, les biosimilaires et les thérapies géniques sont valorisés par le marché mais exigent des investissements lourds où des biotechs ont déjà l'avance.",
+      startYear: 2027,
+      params: { cap: 0.60, rate: 0.030, overdraft: 0.12 },
+      companies: [
+        { id: "P", name: "Laboratoires Berthier", color: "#C8432B", player: true, cash: 0.12, debt: 0.15, debtYears: 5, payout: 0.40 },
+        { id: "A", name: "Helvexa", color: "#2F6E96", persona: "gardien", cash: 0.10, debt: 0.15, debtYears: 6 },
+        { id: "B", name: "Castoria Biotech", color: "#7A5AA6", persona: "conquerant", cash: 0.10, debt: 0.30, debtYears: 7 },
+        { id: "C", name: "Genovo", color: "#A88328", persona: "rentier", cash: 0.10 },
+        { id: "D", name: "Medrill", color: "#2E8A6A", persona: "diversifieur", cash: 0.08, debt: 0.15, debtYears: 5 }
+      ],
+      segments: [
+        { id: "cvx", name: "Cardiologie de marque", group: "marque", D0: 600, path: [[0, 0.02], [20, 0.0]], capex: 0.8, slope: 0.85, mu: 0.40, eps: 1.2, dep: 0.10, vol: 0.010, perBonus: 2,
+          pos: { P: 0.55, A: 0.30, D: 0.15 } },
+        { id: "gen", name: "Génériques", group: "generique", D0: 500, path: [[0, 0.04], [20, 0.03]], capex: 0.6, slope: 0.88, mu: 0.12, eps: 1.8, dep: 0.08, vol: 0.010,
+          pos: { C: 0.50, D: 0.25, A: 0.25 } },
+        { id: "otc", name: "Santé grand public", group: "conso", D0: 350, path: [[0, 0.03], [20, 0.025]], capex: 0.5, slope: 0.88, mu: 0.30, eps: 1.4, dep: 0.08, vol: 0.008, perBonus: 4,
+          pos: { P: 0.35, A: 0.25, D: 0.40 } },
+        { id: "vac", name: "Vaccins", group: "vaccin", D0: 200, path: [[0, 0.04], [20, 0.04]], capex: 1.2, slope: 0.82, mu: 0.30, eps: 1.5, dep: 0.10, vol: 0.060,
+          pos: { A: 0.40, P: 0.30, D: 0.30 } },
+        { id: "onco", name: "Oncologie", group: "bio", D0: 250, path: [[0, 0.10], [20, 0.07]], capex: 1.5, slope: 0.80, mu: 0.42, eps: 1.2, dep: 0.12, vol: 0.020, perBonus: 5, entryX: 0.35,
+          pos: { B: 0.40, A: 0.35, P: 0.25 } },
+        { id: "bios", name: "Biosimilaires", group: "bio", D0: 120, path: [[0, 0.15], [8, 0.10], [20, 0.05]], capex: 1.4, slope: 0.76, mu: 0.26, eps: 1.6, dep: 0.10, vol: 0.020, entryX: 0.4,
+          pos: { C: 0.40, B: 0.35, D: 0.25 } },
+        { id: "thg", name: "Thérapies géniques", group: "bio", D0: 30, path: [[0, 0.30], [5, 0.22], [10, 0.12], [20, 0.06]], capex: 1.8, slope: 0.70, mu: 0.45, eps: 1.4, dep: 0.14, vol: 0.050, perBonus: 3, entryX: 0.5,
+          pos: { B: 0.60, D: 0.25, A: 0.15 } }
+      ],
+      scripted: [
+        { t: 5, text: "Expiration des brevets des grands traitements cardiovasculaires : les génériques s'emparent du marché, la cardiologie de marque s'effondre cette année puis décline durablement.",
+          g: { cvx: -0.15 }, gShift: { cvx: -0.07, gen: 0.03 } },
+        { t: 9, text: "Épidémie saisonnière sévère : les commandes publiques de vaccins bondissent cette année.",
+          g: { vac: 0.25 } }
+      ]
     }
   ];
 
@@ -196,8 +320,18 @@ var ENGINE = (function () {
   const DEFAULT_PARAMS = {
     tax: 0.25, rate: 0.03, maxDE: 1.5, ebitdaMult: 3, maxLoanYears: 8,
     maxDil: 0.20, maxBuyback: 0.10, cap: 0.55, recov: 0.40, issueDisc: 0.10,
-    bcgG: 0.05, overdraft: 0.12, odPremium: 0.04
+    bcgG: 0.05, overdraft: 0.12, odPremium: 0.04,
+    disRecov: 0.75, disFloor: 0.50, maxDisinv: 0.50,
+    floorBase: 0.4, floorSlope: 4, groupX: 0.25
   };
+
+  /* Désinvestissement : actifs cédés avec décote, plus forte quand le créneau est en
+     surcapacité (personne n'a besoin de ces capacités). Plafonné par exercice : sortir
+     d'un créneau d'un coup passe par la vente ou la fermeture de la division. */
+  function disinvestRate(G, seg) {
+    const p = G.params;
+    return clamp(p.disRecov - 0.8 * Math.max(0, (seg.r || 1) - 1), p.disFloor, p.disRecov);
+  }
 
   /* ---------- Économie d'un créneau ---------- */
   function effX(G, co, seg) {
@@ -206,7 +340,7 @@ var ENGINE = (function () {
     for (const sid in co.div) {
       if (sid === seg.id) continue;
       const s2 = segById(G, sid);
-      if (s2.group === seg.group) x += 0.25 * co.div[sid].X / s2.Xnorm;
+      if (s2.group === seg.group) x += G.params.groupX * co.div[sid].X / s2.Xnorm;
     }
     return Math.max(0.05, x);
   }
@@ -230,10 +364,17 @@ var ENGINE = (function () {
     const r = seg.D > 0 ? S / seg.D : 1;
     const f = clamp(Math.pow(Math.max(r, 0.01), -seg.eps), 0.5, 1.45);
     const P = (avgC + seg.dep * seg.capex) * (1 + seg.mu) * f;
+    // Régulation tarifaire : une société en position dominante ne peut pas facturer la
+    // prime de pénurie ; elle vend au prix d'équilibre. Sans cela, le plafonnement de ses
+    // investissements lui garantirait une rente de rareté.
+    const Preg = G.params.priceCap === false ? P : Math.min(P, P / f);
     players.forEach(co => {
       const d = co.div[seg.id];
       d.share = qT > 0 ? d.q / qT : 0;
-      d.rev = P * d.q;
+    });
+    players.forEach(co => {
+      const d = co.div[seg.id];
+      d.rev = (d.share >= G.params.cap ? Preg : P) * d.q;
       d.opex = d.c * d.q;
       d.ebit = d.rev - d.opex - d.depT;
     });
@@ -247,13 +388,21 @@ var ENGINE = (function () {
     seg.hist.push({ t, D: seg.D, g: seg.g, P, r, u, S, n: players.length });
   }
 
-  function segPER(seg) {
+  function segTrend(seg) {
     const h = seg.hist;
     const n = Math.min(3, h.length);
     let g = 0;
     for (let i = h.length - n; i < h.length; i++) g += h[i].g;
-    g = n ? g / n : 0;
-    return clamp(11 + 280 * g, 10, 45) + (seg.perBonus || 0);
+    return n ? g / n : 0;
+  }
+  function segPER(seg) {
+    return clamp(11 + 280 * segTrend(seg), 10, 45) + (seg.perBonus || 0);
+  }
+  /* Valeur plancher d'une division, en fraction de ses actifs : le marché paie des
+     capacités installées dans un créneau qui croît, beaucoup moins dans un créneau qui décline. */
+  function assetFloor(G, seg) {
+    const p = G.params;
+    return clamp(p.floorBase + p.floorSlope * segTrend(seg), p.floorBase, 1.0);
   }
 
   function forecastGrowth(G, seg, t) {
@@ -276,17 +425,28 @@ var ENGINE = (function () {
   function loanTotal(P, rate, n) { return P + rate * P * (n + 1) / 2; }
 
   /* ---------- Valorisation ---------- */
-  function valuation(G, co, npRec) {
-    let rev = 0, w = 0, assets = 0;
+  /* Somme des parties : chaque division vaut PER du créneau × résultat opérationnel
+     normatif après impôt, sans descendre sous sa valeur plancher ; on ajoute la trésorerie et on
+     retranche la dette. Un euro en caisse vaut donc un euro, et un investissement de
+     conquête qui pèse sur les résultats n'est pas sanctionné au-delà de la décote des actifs. */
+  function valuation(G, co) {
+    const tax = G.params.tax;
+    let rev = 0, w = 0, assets = 0, ev = 0;
+    const parts = {};
     for (const sid in co.div) {
-      const d = co.div[sid], seg = segById(G, sid);
-      rev += d.rev || 0; w += (d.rev || 0) * segPER(seg); assets += d.A;
+      const d = co.div[sid], seg = segById(G, sid), per = segPER(seg);
+      rev += d.rev || 0; w += (d.rev || 0) * per; assets += d.A;
+      // résultat normatif : moyenne des deux derniers exercices, pour lisser les à-coups
+      const hh = d.hist || [], prev = hh.length >= 2 ? hh[hh.length - 2].ebit : d.ebit;
+      const ebitN = 0.5 * ((d.ebit || 0) + (prev || 0));
+      parts[sid] = Math.max(per * ebitN * (1 - tax), assetFloor(G, seg) * d.A);
+      ev += parts[sid];
     }
     const PER = rev > 0 ? w / rev : 10;
     const debt = co.loan ? co.loan.out : 0;
     const equity = assets + co.cash - debt;
-    const value = Math.max(PER * npRec, 0.5 * Math.max(0, equity));
-    return { PER, equity, value, assets, debt };
+    const value = Math.max(ev + co.cash - debt, 0.25 * Math.max(0, equity));
+    return { PER, equity, value, assets, debt, ev, parts };
   }
 
   /* ---------- Création d'une partie ---------- */
@@ -295,7 +455,7 @@ var ENGINE = (function () {
     const sc = scenarioById(scId);
     const seed = (opts.seed >>> 0) || ((Date.now() ^ 0x5bd1e995) >>> 0);
     const G = {
-      v: 1, sc: sc.id, title: sc.title, seed, rng: seed | 0,
+      v: VERSION, sc: sc.id, title: sc.title, seed, rng: seed | 0, rngAI: (seed ^ 0x9E3779B9) | 0,
       year: 0, T: opts.years || 15, startYear: sc.startYear || 2027,
       params: Object.assign({}, DEFAULT_PARAMS, sc.params || {}),
       segments: [], companies: [], listings: [], log: [], news: [],
@@ -355,13 +515,13 @@ var ENGINE = (function () {
       const ebt = ebit - interest + intInc;
       const tax = Math.max(0, ebt) * G.params.tax;
       const npRec = ebt - tax;
-      const val = valuation(G, co, npRec);
+      const val = valuation(G, co);
       co.shares = Math.max(1, val.value / 10);
       co.hist.push({
         t: 0, rev, ebit, dep, interest, intInc, tax, npRec, exc: 0, np: npRec, dividends: 0, inv: dep,
         cash: co.cash, debt: val.debt, equity: val.equity, assets: val.assets, value: val.value, PER: val.PER,
         price: val.value / co.shares, dps: 0, score: val.value / co.shares, shares: co.shares,
-        issue: 0, buyback: 0, ma: 0, payout: co.payout
+        issue: 0, buyback: 0, ma: 0, payout: co.payout, ev: val.ev, parts: val.parts
       });
     });
     genNews(G, 1);
@@ -412,9 +572,6 @@ var ENGINE = (function () {
       applyEvent(G, ev);
       G.news.push({ t, kind: ev.kind, text: ev.text });
     }
-    if (G.params.rate !== G.params.rate0 && !G.news.some(n => n.kind === "banque")) {
-      // rien : le taux courant est affiché dans le panneau de financement
-    }
     G.news.forEach(n => G.log.push(n));
   }
 
@@ -444,6 +601,7 @@ var ENGINE = (function () {
 
   /* ---------- IA des concurrents ---------- */
   function aiDecide(G, co) {
+    if (G.preview) return neutralDecision(G, co);
     const p = G.params, t = G.year + 1, k = p.ai || 1;
     const P = Object.assign({}, PERSONAS[co.persona]);
     P.aggr *= k; P.push *= k; P.entry = Math.min(0.9, P.entry * k); P.odUse *= k;
@@ -457,7 +615,7 @@ var ENGINE = (function () {
     G.listings.forEach(L => {
       if (L.seller === co.id) return;
       const seller = coById(G, L.seller);
-      if (!seller.alive) return;
+      if (!seller.alive && !L.liq) return;
       const ld = seller.div[L.seg];
       if (!ld) return;
       const seg = segById(G, L.seg);
@@ -466,13 +624,15 @@ var ENGINE = (function () {
       const gF = forecastGrowth(G, seg, t);
       const interest = own ? 1 : ((gF > 0.04 && P.entry > 0) ? 0.6 : (P.bidBoost ? 0.4 : 0));
       if (!interest) return;
-      const val = ld.A * (0.45 + 0.25 * interest + clamp(gF * 3, -0.15, 0.3) + (P.bidBoost || 0)) * (0.9 + 0.2 * rnd(G));
+      const val = ld.A * (0.45 + 0.25 * interest + clamp(gF * 3, -0.15, 0.3) + (P.bidBoost || 0)) * (0.9 + 0.2 * rnd(G, "rngAI"));
       const amt = Math.min(val, Math.max(0, co.cash - safety) * 0.6);
       if (amt > 0 && amt >= L.minPrice) { dec.bids[L.id] = Math.round(amt); free -= amt; }
     });
 
     const cf = (h.npRec > 0 ? h.npRec * (1 - dec.payout) : h.npRec) + h.dep - (co.loan ? co.loan.ann : 0);
-    let budget = free + cf;
+    // les profils expansionnistes ne misent qu'une partie du cash-flow attendu : un bon
+    // exercice ne se reproduit pas forcément, et leurs propres capacités pèsent sur les prix
+    let budget = free + (cf > 0 ? (P.cfUse || 1) * cf : cf);
 
     const wants = [];
     for (const sid in co.div) {
@@ -480,7 +640,7 @@ var ENGINE = (function () {
       if (G.listings.some(l => l.seller === co.id && l.seg === sid)) continue;
       const gF = 0.5 * seg.g + 0.5 * forecastGrowth(G, seg, t);
       if (d.lossYears >= P.exitPatience && d.rs < 0.7 && gF < 0.06 && t - d.entered > 4) {
-        if (d.unsold >= 1) dec.disinvest[sid] = Math.round(d.A);
+        if (d.unsold >= 1) dec.divest[sid] = { mode: "liq" };
         else dec.divest[sid] = { mode: "auction", min: Math.round(0.45 * d.A) };
         continue;
       }
@@ -504,7 +664,7 @@ var ENGINE = (function () {
       wants.push({ sid, inv: maint, pr: 3 });
       if (inv > maint) wants.push({ sid, inv: inv - maint, pr: d.rs >= 1 ? 2 : 1 });
     }
-    if (P.entry > 0 && t >= 2 && rnd(G) < P.entry) {
+    if (P.entry > 0 && t >= 2 && rnd(G, "rngAI") < P.entry) {
       const cands = G.segments.filter(s => !co.div[s.id] && forecastGrowth(G, s, t) > 0.05);
       if (cands.length) {
         cands.sort((a, b) => forecastGrowth(G, b, t) - forecastGrowth(G, a, t));
@@ -540,6 +700,47 @@ var ENGINE = (function () {
     return dec;
   }
 
+  /* ---------- Aperçu de l'exercice ----------
+     Hypothèses affichées au joueur : conjoncture sans aléa, concurrents qui investissent
+     ce qu'il faut pour garder leur part, sans entrée, cession ni rachat. L'aperçu ne révèle
+     donc ni l'aléa de demande ni les décisions réelles des concurrents. */
+  function neutralDecision(G, co) {
+    const dec = { invest: {}, disinvest: {}, divest: {}, payout: PERSONAS[co.persona] ? PERSONAS[co.persona].payout : 0.3, loan: null, issuePct: 0, buybackPct: 0, bids: {} };
+    for (const sid in co.div) dec.invest[sid] = investHints(G, co, sid).follow;
+    return dec;
+  }
+  function preview(G, playerDec) {
+    const H = JSON.parse(JSON.stringify(G));
+    H.preview = true;
+    H.segments.forEach(s => { s.vol = 0; });
+    H.listings = H.listings.filter(l => l.seller === H.companies.find(c => c.player).id);
+    const R = simulateYear(H, playerDec);
+    const co = H.companies.find(c => c.player);
+    return { G: H, R, co, h: lastH(co) };
+  }
+
+  /* ---------- Décomposition de la variation du cours ----------
+     Exacte : Δcours = Σ divisions Δvaleur / N₀ + Δtrésorerie nette / N₀ + effet du nombre
+     d'actions + reste (plancher de fonds propres). */
+  function priceBridge(co) {
+    const H = co.hist, n = H.length;
+    if (n < 2) return null;
+    const h1 = H[n - 1], h0 = H[n - 2], N0 = h0.shares, N1 = h1.shares;
+    if (!h1.parts || !h0.parts) return null;
+    const divs = {};
+    const ids = new Set(Object.keys(h0.parts).concat(Object.keys(h1.parts)));
+    ids.forEach(sid => { divs[sid] = ((h1.parts[sid] || 0) - (h0.parts[sid] || 0)) / N0; });
+    const flows = {
+      caf: (h1.npRec + h1.dep) / N0, inv: -h1.inv / N0, div: -h1.dividends / N0,
+      ma: ((h1.ma || 0) + (h1.disinv || 0)) / N0, capital: ((h1.issue || 0) - (h1.buyback || 0)) / N0
+    };
+    const nc0 = h0.cash - h0.debt, nc1 = h1.cash - h1.debt;
+    const V1 = h1.value;
+    const shares = V1 / N1 - V1 / N0;
+    const rest = (h1.price - h0.price) - (sum(Object.values(divs)) + (nc1 - nc0) / N0 + shares);
+    return { divs, flows, netCash: (nc1 - nc0) / N0, shares, rest, dPrice: h1.price - h0.price, dps: h1.dps, dScore: h1.score - h0.score };
+  }
+
   /* ---------- Nettoyage de la décision du joueur ---------- */
   function sanitize(G, co, dec) {
     dec = dec || {};
@@ -557,7 +758,7 @@ var ENGINE = (function () {
     for (const sid in (dec.disinvest || {})) {
       const v = +dec.disinvest[sid];
       if (!co.div[sid] || !isFinite(v) || v <= 0 || out.divest[sid] || G.listings.some(l => l.seller === co.id && l.seg === sid)) continue;
-      out.disinvest[sid] = Math.min(v, co.div[sid].A);
+      out.disinvest[sid] = Math.min(v, G.params.maxDisinv * co.div[sid].A);
       delete out.invest[sid];
     }
     if (dec.loan && +dec.loan.amount > 0) out.loan = { amount: +dec.loan.amount, years: clamp(Math.round(+dec.loan.years || 5), 2, G.params.maxLoanYears) };
@@ -586,14 +787,15 @@ var ENGINE = (function () {
     open.forEach(L => {
       const seller = coById(G, L.seller);
       const seg = segById(G, L.seg);
-      if (!seller.alive || !seller.div[L.seg]) return;
+      if ((!seller.alive && !L.liq) || !seller.div[L.seg]) return;
       const d = seller.div[L.seg];
+      const from = L.liq ? "le liquidateur de " + seller.name : seller.name;
       let best = null;
       alive.forEach(b => {
         if (b.id === L.seller) return;
         const amt = (decs[b.id].bids || {})[L.id];
         if (!(amt > 0)) return;
-        if (amt < L.minPrice) { if (b.player) R.notes.push("Votre offre sur « " + seg.name + " » (" + fmt(amt) + " M€) est inférieure au prix minimal fixé par " + seller.name + "."); return; }
+        if (amt < L.minPrice) { if (b.player) R.notes.push("Votre offre sur « " + seg.name + " » (" + fmt(amt) + " M€) est inférieure au prix minimal fixé par " + from + "."); return; }
         if (b.cash < amt) { if (b.player) R.notes.push("Offre sur « " + seg.name + " » annulée : trésorerie insuffisante au moment du règlement."); return; }
         const bd = b.div[L.seg];
         if ((bd ? bd.share : 0) + d.share > p.cap) { if (b.player) R.notes.push("L'autorité de la concurrence bloque votre rachat de « " + seg.name + " » : la part cumulée dépasserait " + pct(p.cap) + "."); return; }
@@ -601,14 +803,17 @@ var ENGINE = (function () {
       });
       if (best) {
         const b = best.b, amt = best.amt;
-        seller.cash += amt; seller._exc += amt - d.A; seller._ma += amt; seller._sold[L.seg] = true;
+        if (!L.liq) { seller.cash += amt; seller._exc += amt - d.A; seller._ma += amt; seller._sold[L.seg] = true; }
         delete seller.div[L.seg];
         b.cash -= amt; b._ma -= amt;
         const bd = b.div[L.seg];
         if (bd) { bd.K += d.K; bd.A += d.A; bd.X += d.X; bd.share += d.share; }
         else b.div[L.seg] = { K: d.K, A: d.A, X: d.X, share: d.share, rs: d.rs, lossYears: 0, unsold: 0, depT: d.depT, inv: 0, entered: t, hist: [] };
         R.ma.push({ seg: seg.name, seller: seller.name, buyer: b.name, amt, A: d.A, player: seller.player || b.player });
-        G.log.push({ t, kind: "cession", text: b.name + " rachète « " + seg.name + " » à " + seller.name + " pour " + fmt(amt) + " M€ (actifs : " + fmt(d.A) + " M€)." });
+        G.log.push({ t, kind: "cession", text: b.name + " rachète « " + seg.name + " » à " + from + " pour " + fmt(amt) + " M€ (actifs : " + fmt(d.A) + " M€)." });
+      } else if (L.liq) {
+        delete seller.div[L.seg];
+        G.log.push({ t, kind: "cession", text: "Aucun repreneur pour « " + seg.name + " » de " + seller.name + " : les capacités sont démantelées." });
       } else {
         d.unsold = (d.unsold || 0) + 1;
         R.ma.push({ seg: seg.name, seller: seller.name, buyer: null, amt: 0, A: d.A, player: seller.player });
@@ -683,18 +888,17 @@ var ENGINE = (function () {
           G.log.push({ t, kind: "entrée", text: co.name + " entre sur « " + seg.name + " » avec " + fmt(amount) + " M€ d'investissement." });
         }
         if (!d) return;
-        const dis = Math.min(d.A, Math.max(0, +((dc.disinvest || {})[seg.id] || 0)));
+        const disReq = Math.max(0, +((dc.disinvest || {})[seg.id] || 0));
+        const dis = Math.min(p.maxDisinv * d.A, disReq);
         if (dis > 0 && !G.listings.some(l => l.seller === co.id && l.seg === seg.id)) {
-          co.cash += dis; co._disinv += dis; amount = 0;
-          if (dis >= d.A - 0.5) {
-            co._sold[seg.id] = true;
-            delete co.div[seg.id];
-            G.log.push({ t, kind: "désinvestissement", text: co.name + " cède la totalité des actifs de « " + seg.name + " » (" + fmt(dis) + " M€) et quitte le créneau." });
-            if (co.player) R.notes.push("« " + seg.name + " » : actifs entièrement cédés pour " + fmt(dis) + " M€ ; vous quittez le créneau.");
-            return;
-          }
+          const got = disinvestRate(G, seg) * dis;
+          co.cash += got; co._disinv += got; co._exc -= dis - got; amount = 0;
           d.A -= dis;
-          G.log.push({ t, kind: "désinvestissement", text: co.name + " désinvestit " + fmt(dis) + " M€ d'actifs dans « " + seg.name + " »." });
+          G.log.push({ t, kind: "désinvestissement", text: co.name + " désinvestit " + fmt(dis) + " M€ d'actifs dans « " + seg.name + " » et en récupère " + fmt(got) + " M€." });
+          if (co.player) {
+            if (disReq > dis + 0.5) R.notes.push("« " + seg.name + " » : désinvestissement plafonné à " + pct(p.maxDisinv, 0) + " des actifs, soit " + fmt(dis) + " M€.");
+            R.notes.push("« " + seg.name + " » : " + fmt(dis) + " M€ d'actifs cédés pour " + fmt(got) + " M€, moins-value de " + fmt(dis - got) + " M€.");
+          }
         }
         const maint = seg.dep * d.A;
         if (co.player && amount > 0) G.pinv.push({ t, sid: seg.id, inv: amount, quad: quadrant(G, seg, d.share > 0 ? d.rs : 0, true), entry: d.entered === t });
@@ -750,11 +954,11 @@ var ENGINE = (function () {
         co.cash += co.pendingLoan.P0; co.loan = co.pendingLoan; co.pendingLoan = null;
         G.log.push({ t, kind: "banque", text: co.name + " obtient un emprunt de " + fmt(co.loan.P0) + " M€ sur " + co.loan.years + " ans à " + pct(co.loan.rate, 2) + "." });
       }
-      const val = valuation(G, co, npRec);
+      const val = valuation(G, co);
       let price = val.value / co.shares;
       const dps = dividends / co.shares;
       co.dps.push(dps);
-      let score = price + sum(co.dps) / co.dps.length;
+      let score = price + sum(co.dps);
       co.overdraft = p.overdraft * Math.max(rev, 0.5 * co.hist[0].rev);
       if (co.cash < -co.overdraft) {
         co.alive = false; co.bankrupt = t; price = 0; score = 0;
@@ -765,14 +969,20 @@ var ENGINE = (function () {
       co.hist.push({
         t, rev, ebit, dep, interest, intInc, tax, npRec, exc: co._exc, np, dividends, inv: co._inv,
         disinv: co._disinv, cash: co.cash, debt: val.debt, equity: val.equity, assets: val.assets, value: co.alive ? val.value : 0, PER: val.PER,
-        price, dps, score, shares: co.shares, issue: co._issue, buyback: co._buyback, ma: co._ma, payout: co.payoutUsed, repay
+        price, dps, score, shares: co.shares, issue: co._issue, buyback: co._buyback, ma: co._ma, payout: co.payoutUsed, repay,
+        ev: co.alive ? val.ev : 0, parts: co.alive ? val.parts : {}
       });
     });
-    // sociétés en faillite : capacités retirées du marché
+    // sociétés en faillite : capacités retirées du marché, divisions vendues par le liquidateur
+    // l'exercice suivant (prix minimal de 20 % des actifs), démantelées faute de repreneur
     G.companies.forEach(co => {
       if (!co.alive && co.bankrupt === t) {
-        co.div = {};
         G.listings = G.listings.filter(l => l.seller !== co.id);
+        for (const sid in co.div) {
+          const d = co.div[sid];
+          G.listings.push({ id: G.nextListingId++, seller: co.id, seg: sid, minPrice: Math.round(0.2 * d.A), t, liq: true });
+          G.log.push({ t, kind: "cession", text: "Le liquidateur de " + co.name + " met en vente « " + segById(G, sid).name + " » (prix minimal " + fmt(0.2 * d.A) + " M€)." });
+        }
       }
     });
     alive.forEach(co => { delete co._sold; });
@@ -811,8 +1021,8 @@ var ENGINE = (function () {
   }
 
   return {
-    SCENARIOS, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
-    forecastGrowth, quadrant, segPER, segById, coById, lastH, valuation, pathGrowth, unitCost, fmt, pct, clamp, sum, sanitize
+    VERSION, SCENARIOS, disinvestRate, aiDecide, preview, priceBridge, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
+    forecastGrowth, quadrant, segPER, assetFloor, segById, coById, lastH, valuation, pathGrowth, unitCost, fmt, pct, clamp, sum, sanitize
   };
 })();
 if (typeof module !== "undefined") module.exports = ENGINE;
