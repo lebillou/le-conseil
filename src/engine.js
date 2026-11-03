@@ -52,7 +52,7 @@ var ENGINE = (function () {
       desc: "Cherche la part de marché dans les créneaux en croissance, finance par dette et augmentations de capital.",
       payout: 0.12, aggr: 1.0, push: 0.55, harvestG: -0.02, harvestRS: 0.35, util: 0.95,
       debt: true, equity: true, entry: 0.30, entryShare: 0.12, odUse: 0.45, exitPatience: 4,
-      buyback: false, flexDiv: true, loanYears: 8
+      buyback: false, flexDiv: true, loanYears: 8, cfUse: 0.7
     },
     rentier: {
       label: "Rentier",
@@ -66,7 +66,7 @@ var ENGINE = (function () {
       desc: "Multiplie les entrées dans les créneaux nouveaux, au risque de la dispersion.",
       payout: 0.30, aggr: 0.55, push: 0.3, harvestG: 0.0, harvestRS: 0.5, util: 0.96,
       debt: true, equity: false, entry: 0.45, entryShare: 0.10, odUse: 0.15, exitPatience: 3,
-      buyback: false, flexDiv: true, loanYears: 7
+      buyback: false, flexDiv: true, loanYears: 7, cfUse: 0.85
     },
     opportuniste: {
       label: "Opportuniste",
@@ -191,6 +191,122 @@ var ENGINE = (function () {
       scripted: [
         { t: 4, text: "Révision du règlement F-gaz : interdiction anticipée des HFC dans les vitrines neuves. Les centrales CO₂ deviennent la norme.",
           gShift: { hfc: -0.06, co2: 0.03 } }
+      ]
+    },
+    {
+      id: "auto",
+      difficulty: "Difficile",
+      title: "Automobile européenne",
+      kicker: "Financer la bascule électrique",
+      pitch: "Généraliste européen, vous dominez les citadines thermiques, les utilitaires et l'après-vente. Ces métiers financent le groupe mais l'interdiction programmée des moteurs thermiques les condamne. Un constructeur asiatique a pris de l'avance sur l'électrique et les batteries. Il faut décider quoi exploiter, quoi abandonner et où investir pendant qu'il reste du cash.",
+      startYear: 2027,
+      params: { cap: 0.55, rate: 0.030, overdraft: 0.12 },
+      companies: [
+        { id: "P", name: "Valmont Automobiles", color: "#C8432B", player: true, cash: 0.08, debt: 0.30, debtYears: 6, payout: 0.30 },
+        { id: "A", name: "Hartwig Motoren", color: "#2F6E96", persona: "gardien", cash: 0.10, debt: 0.20, debtYears: 6 },
+        { id: "B", name: "Kaishan Motors", color: "#7A5AA6", persona: "conquerant", cash: 0.10, debt: 0.25, debtYears: 7 },
+        { id: "C", name: "Ostrava Auto", color: "#A88328", persona: "rentier", cash: 0.10 },
+        { id: "D", name: "Aldren Mobility", color: "#2E8A6A", persona: "diversifieur", cash: 0.08, debt: 0.15, debtYears: 5 }
+      ],
+      segments: [
+        { id: "cth", name: "Citadines thermiques", group: "thermique", D0: 700, path: [[0, -0.03], [5, -0.07], [10, -0.12], [20, -0.12]], capex: 0.9, slope: 0.85, mu: 0.20, eps: 1.6, dep: 0.08, vol: 0.012,
+          pos: { P: 0.40, C: 0.35, A: 0.10, D: 0.15 } },
+        { id: "sth", name: "Berlines et SUV thermiques", group: "thermique", D0: 900, path: [[0, -0.01], [5, -0.05], [10, -0.10], [20, -0.10]], capex: 1.0, slope: 0.85, mu: 0.26, eps: 1.5, dep: 0.08, vol: 0.012,
+          pos: { A: 0.45, P: 0.20, C: 0.20, D: 0.15 } },
+        { id: "utl", name: "Utilitaires légers", group: "thermique", D0: 400, path: [[0, 0.02], [10, 0.0], [20, -0.03]], capex: 0.9, slope: 0.85, mu: 0.22, eps: 1.5, dep: 0.08, vol: 0.012,
+          pos: { P: 0.40, C: 0.30, A: 0.30 } },
+        { id: "cve", name: "Compactes électriques", group: "electrique", D0: 250, path: [[0, 0.20], [6, 0.15], [12, 0.08], [20, 0.04]], capex: 1.3, slope: 0.78, mu: 0.24, eps: 1.7, dep: 0.10, vol: 0.020, entryX: 0.5,
+          pos: { B: 0.45, D: 0.25, P: 0.15, A: 0.15 } },
+        { id: "sve", name: "SUV électriques", group: "electrique", D0: 300, path: [[0, 0.16], [6, 0.12], [12, 0.07], [20, 0.04]], capex: 1.4, slope: 0.80, mu: 0.28, eps: 1.6, dep: 0.10, vol: 0.020, entryX: 0.5,
+          pos: { A: 0.40, B: 0.35, D: 0.25 } },
+        { id: "btr", name: "Batteries de traction", group: "batterie", D0: 200, path: [[0, 0.22], [6, 0.15], [12, 0.07], [20, 0.04]], capex: 1.6, slope: 0.72, mu: 0.26, eps: 1.8, dep: 0.10, vol: 0.025, entryX: 0.4,
+          pos: { B: 0.70, D: 0.30 } },
+        { id: "apv", name: "Pièces et après-vente", group: "service", D0: 350, path: [[0, 0.03], [20, 0.01]], capex: 0.5, slope: 0.88, mu: 0.32, eps: 1.3, dep: 0.10, vol: 0.008, perBonus: 4,
+          pos: { P: 0.30, A: 0.30, C: 0.25, D: 0.15 } },
+        { id: "logi", name: "Logiciel et services connectés", group: "logiciel", D0: 80, path: [[0, 0.18], [8, 0.12], [20, 0.06]], capex: 0.4, slope: 0.70, mu: 0.38, eps: 1.4, dep: 0.20, vol: 0.030, perBonus: 3, entryX: 0.5,
+          pos: { D: 0.40, A: 0.30, B: 0.15, P: 0.15 } }
+      ],
+      scripted: [
+        { t: 4, text: "L'Union confirme la fin des ventes de voitures thermiques neuves et durcit les normes intermédiaires : la demande thermique recule plus vite, l'électrique accélère.",
+          gShift: { cth: -0.03, sth: -0.03, utl: -0.02, cve: 0.02, sve: 0.02, btr: 0.02 } },
+        { t: 7, text: "Effondrement du prix du lithium : le coût des batteries baisse de 15 %, celui des véhicules électriques de 8 % cette année.",
+          cost: { btr: 0.85, cve: 0.92, sve: 0.92 } }
+      ]
+    },
+    {
+      id: "numerique",
+      difficulty: "Intermédiaire",
+      title: "Numérique et cloud",
+      kicker: "Services informatiques face aux plateformes",
+      pitch: "Champion européen de l'intégration et de l'infogérance, vous êtes rentable mais faiblement valorisé : ces métiers croissent peu et le marché les paie mal. Les logiciels et la cybersécurité valent bien plus, le cloud est verrouillé par une plateforme américaine, et les puces pour l'intelligence artificielle s'arrachent. Reste à savoir si cet engouement va durer.",
+      startYear: 2027,
+      params: { cap: 0.60, rate: 0.030, overdraft: 0.12 },
+      companies: [
+        { id: "P", name: "Sorevia", color: "#C8432B", player: true, cash: 0.10, debt: 0.20, debtYears: 5, payout: 0.30 },
+        { id: "A", name: "Kalder Systems", color: "#2F6E96", persona: "gardien", cash: 0.10, debt: 0.15, debtYears: 6 },
+        { id: "B", name: "Northgate Cloud", color: "#7A5AA6", persona: "conquerant", cash: 0.12, debt: 0.20, debtYears: 7 },
+        { id: "C", name: "Marbeck Data", color: "#A88328", persona: "opportuniste", cash: 0.08, debt: 0.20, debtYears: 6 },
+        { id: "D", name: "Ilios Tech", color: "#2E8A6A", persona: "diversifieur", cash: 0.09, debt: 0.10, debtYears: 5 }
+      ],
+      segments: [
+        { id: "itg", name: "Intégration et infogérance", group: "service", D0: 700, path: [[0, 0.02], [20, 0.01]], capex: 0.3, slope: 0.93, mu: 0.14, eps: 1.4, dep: 0.15, vol: 0.010,
+          pos: { P: 0.40, C: 0.25, A: 0.20, D: 0.15 } },
+        { id: "hw", name: "Serveurs et stockage", group: "materiel", D0: 500, path: [[0, 0.03], [20, 0.01]], capex: 0.9, slope: 0.82, mu: 0.22, eps: 1.6, dep: 0.10, vol: 0.012,
+          pos: { A: 0.45, P: 0.20, C: 0.20, D: 0.15 } },
+        { id: "cld", name: "Cloud d'infrastructure", group: "cloud", D0: 400, path: [[0, 0.18], [8, 0.12], [20, 0.06]], capex: 1.8, slope: 0.74, mu: 0.30, eps: 1.6, dep: 0.12, vol: 0.015, entryX: 0.4,
+          pos: { B: 0.60, A: 0.25, D: 0.15 } },
+        { id: "csv", name: "Cloud souverain", group: "cloud", D0: 60, path: [[0, 0.12], [20, 0.08]], capex: 1.6, slope: 0.78, mu: 0.30, eps: 1.5, dep: 0.12, vol: 0.020, entryX: 0.5, perBonus: 2,
+          pos: { C: 0.50, P: 0.25, D: 0.25 } },
+        { id: "saas", name: "Logiciels d'entreprise", group: "logiciel", D0: 300, path: [[0, 0.12], [10, 0.09], [20, 0.05]], capex: 0.4, slope: 0.72, mu: 0.34, eps: 1.3, dep: 0.20, vol: 0.015, perBonus: 5, entryX: 0.5,
+          pos: { A: 0.35, D: 0.30, B: 0.20, P: 0.15 } },
+        { id: "cyb", name: "Cybersécurité", group: "logiciel", D0: 150, path: [[0, 0.15], [10, 0.11], [20, 0.07]], capex: 0.4, slope: 0.75, mu: 0.36, eps: 1.3, dep: 0.20, vol: 0.015, perBonus: 6, entryX: 0.5,
+          pos: { D: 0.40, C: 0.35, A: 0.25 } },
+        { id: "puce", name: "Puces pour l'intelligence artificielle", group: "puce", D0: 150, path: [[0, 0.30], [4, 0.25], [8, 0.10], [20, 0.05]], capex: 2.0, slope: 0.70, mu: 0.34, eps: 2.0, dep: 0.14, vol: 0.040, entryX: 0.3,
+          pos: { B: 0.55, A: 0.45 } }
+      ],
+      scripted: [
+        { t: 3, text: "Règlement européen sur la souveraineté des données : la commande publique et les secteurs régulés doivent recourir à un cloud hébergé et opéré en Europe.",
+          gShift: { csv: 0.06 } },
+        { t: 8, text: "Les centres de données ont surinvesti : les commandes de puces pour l'intelligence artificielle s'effondrent cette année et la croissance du créneau ne retrouvera pas son rythme.",
+          g: { puce: -0.20 }, gShift: { puce: -0.08 } }
+      ]
+    },
+    {
+      id: "pharma",
+      difficulty: "Difficile",
+      title: "Laboratoire pharmaceutique",
+      kicker: "Préparer la falaise des brevets",
+      pitch: "Votre laboratoire vit de sa franchise cardiovasculaire, très rentable, et de la santé grand public. Les brevets des molécules phares expirent dans quelques exercices : les génériques prendront alors l'essentiel du marché. L'oncologie, les biosimilaires et les thérapies géniques sont valorisés par le marché mais exigent des investissements lourds où des biotechs ont déjà l'avance.",
+      startYear: 2027,
+      params: { cap: 0.60, rate: 0.030, overdraft: 0.12 },
+      companies: [
+        { id: "P", name: "Laboratoires Berthier", color: "#C8432B", player: true, cash: 0.12, debt: 0.15, debtYears: 5, payout: 0.40 },
+        { id: "A", name: "Helvexa", color: "#2F6E96", persona: "gardien", cash: 0.10, debt: 0.15, debtYears: 6 },
+        { id: "B", name: "Castoria Biotech", color: "#7A5AA6", persona: "conquerant", cash: 0.10, debt: 0.30, debtYears: 7 },
+        { id: "C", name: "Genovo", color: "#A88328", persona: "rentier", cash: 0.10 },
+        { id: "D", name: "Medrill", color: "#2E8A6A", persona: "diversifieur", cash: 0.08, debt: 0.15, debtYears: 5 }
+      ],
+      segments: [
+        { id: "cvx", name: "Cardiologie de marque", group: "marque", D0: 600, path: [[0, 0.02], [20, 0.0]], capex: 0.8, slope: 0.85, mu: 0.40, eps: 1.2, dep: 0.10, vol: 0.010, perBonus: 2,
+          pos: { P: 0.55, A: 0.30, D: 0.15 } },
+        { id: "gen", name: "Génériques", group: "generique", D0: 500, path: [[0, 0.04], [20, 0.03]], capex: 0.6, slope: 0.88, mu: 0.12, eps: 1.8, dep: 0.08, vol: 0.010,
+          pos: { C: 0.50, D: 0.25, A: 0.25 } },
+        { id: "otc", name: "Santé grand public", group: "conso", D0: 350, path: [[0, 0.03], [20, 0.025]], capex: 0.5, slope: 0.88, mu: 0.30, eps: 1.4, dep: 0.08, vol: 0.008, perBonus: 4,
+          pos: { P: 0.35, A: 0.25, D: 0.40 } },
+        { id: "vac", name: "Vaccins", group: "vaccin", D0: 200, path: [[0, 0.04], [20, 0.04]], capex: 1.2, slope: 0.82, mu: 0.30, eps: 1.5, dep: 0.10, vol: 0.060,
+          pos: { A: 0.40, P: 0.30, D: 0.30 } },
+        { id: "onco", name: "Oncologie", group: "bio", D0: 250, path: [[0, 0.10], [20, 0.07]], capex: 1.5, slope: 0.80, mu: 0.42, eps: 1.2, dep: 0.12, vol: 0.020, perBonus: 5, entryX: 0.35,
+          pos: { B: 0.40, A: 0.35, P: 0.25 } },
+        { id: "bios", name: "Biosimilaires", group: "bio", D0: 120, path: [[0, 0.15], [8, 0.10], [20, 0.05]], capex: 1.4, slope: 0.76, mu: 0.26, eps: 1.6, dep: 0.10, vol: 0.020, entryX: 0.4,
+          pos: { C: 0.40, B: 0.35, D: 0.25 } },
+        { id: "thg", name: "Thérapies géniques", group: "bio", D0: 30, path: [[0, 0.30], [5, 0.22], [10, 0.12], [20, 0.06]], capex: 1.8, slope: 0.70, mu: 0.45, eps: 1.4, dep: 0.14, vol: 0.050, perBonus: 3, entryX: 0.5,
+          pos: { B: 0.60, D: 0.25, A: 0.15 } }
+      ],
+      scripted: [
+        { t: 5, text: "Expiration des brevets des grands traitements cardiovasculaires : les génériques s'emparent du marché, la cardiologie de marque s'effondre cette année puis décline durablement.",
+          g: { cvx: -0.15 }, gShift: { cvx: -0.07, gen: 0.03 } },
+        { t: 9, text: "Épidémie saisonnière sévère : les commandes publiques de vaccins bondissent cette année.",
+          g: { vac: 0.25 } }
       ]
     }
   ];
@@ -514,7 +630,9 @@ var ENGINE = (function () {
     });
 
     const cf = (h.npRec > 0 ? h.npRec * (1 - dec.payout) : h.npRec) + h.dep - (co.loan ? co.loan.ann : 0);
-    let budget = free + cf;
+    // les profils expansionnistes ne misent qu'une partie du cash-flow attendu : un bon
+    // exercice ne se reproduit pas forcément, et leurs propres capacités pèsent sur les prix
+    let budget = free + (cf > 0 ? (P.cfUse || 1) * cf : cf);
 
     const wants = [];
     for (const sid in co.div) {

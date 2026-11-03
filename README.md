@@ -12,7 +12,13 @@ Ou ouvrir `index.html` dans un navigateur : le fichier est autonome, sans serveu
 
 ## Contenu
 
-- Trois scénarios : groupe industriel diversifié, transport terrestre longue distance, froid commercial européen.
+- Six scénarios inspirés de secteurs réels (sociétés et chiffres fictifs) :
+  - groupe industriel diversifié : choisir où concentrer les ressources avant que la vache à lait s'épuise ;
+  - transport terrestre longue distance : entrer sur la grande vitesse face aux opérateurs historiques ;
+  - froid commercial européen : la transition des fluides frigorigènes ;
+  - automobile européenne : financer la bascule électrique avec des métiers thermiques condamnés ;
+  - numérique et cloud : quitter des services peu valorisés sans se brûler sur le cloud ou la bulle des puces pour l'IA ;
+  - laboratoire pharmaceutique : préparer la falaise des brevets.
 - Courbe d'expérience (avec expérience partagée entre créneaux d'un même métier), équilibre offre/demande, cycle de vie des créneaux.
 - Investissement, désinvestissement d'actifs (décoté, plafonné à 50 % par exercice), vente aux enchères ou fermeture de divisions, rachat de divisions concurrentes.
 - Dividende, emprunt bancaire, augmentation de capital, rachat d'actions.

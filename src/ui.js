@@ -6,7 +6,10 @@
   const SAVE_KEY = "leconseil.partie.v2";
   const SHORT = { emb: "Emballages", mac: "Machines-outils", cmp: "Composants", bat: "Batteries", pmt: "Pièces thermiques", cap: "Capteurs", med: "Médical",
     gvfr: "GV France", gvde: "GV Allemagne", gves: "GV Espagne", gvit: "GV Italie", icfr: "IC France", icde: "IC Allemagne", icsud: "IC Sud", car: "Autocars",
-    mfr: "Meubles FR", mde: "Meubles DACH", msud: "Meubles Sud", muk: "Meubles UK", co2: "Centrales CO₂", hfc: "Vitrines HFC", srv: "Services", chf: "Chambres froides" };
+    mfr: "Meubles FR", mde: "Meubles DACH", msud: "Meubles Sud", muk: "Meubles UK", co2: "Centrales CO₂", hfc: "Vitrines HFC", srv: "Services", chf: "Chambres froides",
+    cth: "Citadines therm.", sth: "SUV therm.", utl: "Utilitaires", cve: "Compactes VE", sve: "SUV VE", btr: "Batteries", apv: "Après-vente", logi: "Logiciel",
+    itg: "Intégration", hw: "Serveurs", cld: "Cloud", csv: "Cloud souverain", saas: "SaaS", cyb: "Cybersécurité", puce: "Puces IA",
+    cvx: "Cardiologie", gen: "Génériques", otc: "Grand public", vac: "Vaccins", onco: "Oncologie", bios: "Biosimilaires", thg: "Thérapies géniques" };
   const QUAD = { vedette: "Vedette", vache: "Vache à lait", dilemme: "Dilemme", poids: "Poids mort" };
   const TABS = [
     ["conseil", "Séance du conseil"], ["divisions", "Divisions"], ["marches", "Marchés"], ["matrice", "Matrice BCG"],
