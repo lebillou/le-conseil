@@ -57,7 +57,33 @@ function strategies(sc) {
   // pousser un créneau en forte croissance où le joueur n'est pas leader
   G0.segments.filter(s => pl.div[s.id] && pl.div[s.id].rs < 1 && E.forecastGrowth(G0, s, 1) > 0.07)
     .forEach(s => { S["pousser " + s.id] = entry(s.id, Math.min(0.35, pl.div[s.id].share + 0.15), 5); });
+  // la société du joueur pilotée par la logique d'un concurrent : mesure l'équité de la position de départ
+  for (const k of ["gardien", "conquerant", "diversifieur"]) S["IA " + k] = (G, co) => {
+    co.persona = k;
+    try { return E.aiDecide(G, co); } finally { co.persona = null; }
+  };
+  // consolider un métier : toutes les divisions d'un même groupe partagent leur expérience
+  const groups = {};
+  for (const sid in pl.div) { const g = E.segById(G0, sid).group; (groups[g] = groups[g] || []).push(sid); }
+  for (const g in groups) if (groups[g].length >= 3) S["consolider " + g] = consolidate(groups[g]);
   return S;
+}
+
+function consolidate(sids) {
+  return (G, co) => {
+    const d = base(G, co, "recentre");
+    sids.forEach(sid => {
+      const dv = co.div[sid], seg = E.segById(G, sid);
+      if (!dv) return;
+      const h = E.investHints(G, co, sid);
+      delete d.divest[sid];
+      d.invest[sid] = h.gF > 0 && seg.r < 1.08 ? h.plus5 : h.follow;
+    });
+    d.payout = 0.2;
+    const ml = E.maxLoan(G, co);
+    if (ml > 10 && G.year + 1 < G.T - 4) d.loan = { amount: Math.round(0.5 * ml), years: 8 };
+    return guardCash(G, co, d);
+  };
 }
 
 function evaluate(sc, N, strat) {

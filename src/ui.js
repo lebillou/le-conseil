@@ -91,18 +91,29 @@
     const loanIn = d.loan ? Math.min(+d.loan.amount || 0, ml) : 0;
     const end = cash + loanIn;
     const limit = p.overdraft * Math.max(h.rev, 0.5 * co.hist[0].rev);
-    const lvl = end < -limit ? "bad" : end < 0 ? "warn" : "good";
-    return { inv, dis, end, limit, lvl, divEst, issue, buy, loanIn, ml };
+    // l'aperçu simule l'exercice ; à défaut, estimation comptable sur le résultat de l'an dernier
+    const pv = runPreview();
+    const endP = pv ? pv.h.cash : end;
+    const lvl = pv ? (!pv.co.alive ? "bad" : endP < 0 ? "warn" : "good") : (end < -limit ? "bad" : end < 0 ? "warn" : "good");
+    return { inv, dis, end: endP, limit, lvl, divEst, issue, buy, loanIn, ml, pv };
+  }
+  function runPreview() {
+    try {
+      const dec = JSON.parse(JSON.stringify(S.draft));
+      if (dec.loan && !(dec.loan.amount > 0)) dec.loan = null;
+      return E.preview(S.G, dec);
+    } catch (e) { return null; }
   }
 
   /* ---------------- graphiques SVG ---------------- */
   function niceTicks(min, max, n) {
     if (!isFinite(min) || !isFinite(max)) return [0, 1];
-    if (min === max) { max = min + 1; min = min - 1; }
+    // écart nul ou réduit à un arrondi flottant : élargir, sinon le pas passe sous la précision
+    if (max - min < 1e-9 * Math.max(1, Math.abs(max))) { max = max + 1; min = min - 1; }
     const span = max - min, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
     const step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(s => span / s <= n) || 10 * mag;
     const t = [];
-    for (let v = Math.floor(min / step) * step; v <= max + step * 0.001; v += step) t.push(+v.toFixed(10));
+    for (let v = Math.floor(min / step) * step, i = 0; v <= max + step * 0.001 && i < 50; v += step, i++) t.push(+v.toFixed(10));
     if (t[t.length - 1] < max) t.push(t[t.length - 1] + step);
     return t;
   }
@@ -158,7 +169,7 @@
     const lx = v => Math.log10(v);
     const X = rs => ml + (1 - (lx(rs) + 1) / 2) * (W - ml - mr);
     const Y = g => mt + (1 - (g - gmin) / (gmax - gmin)) * (H - mt - mb);
-    const maxRev = Math.max(1, ...G.companies.flatMap(c => Object.values(c.div).map(d => d.rev || 0)));
+    const maxRev = Math.max(1, ...G.companies.filter(c => c.alive).flatMap(c => Object.values(c.div).map(d => d.rev || 0)));
     let s = "";
     s += `<rect x="${ml}" y="${mt}" width="${X(1) - ml}" height="${Y(G.params.bcgG) - mt}" fill="var(--good)" opacity="0.06"/>`;
     s += `<rect x="${X(1)}" y="${Y(G.params.bcgG)}" width="${W - mr - X(1)}" height="${H - mb - Y(G.params.bcgG)}" fill="var(--bad)" opacity="0.06"/>`;
@@ -254,7 +265,7 @@
         <span class="eyebrow">${esc(s.kicker)}</span>
         <h3>${esc(s.title)}</h3>
         <p class="small">${esc(s.pitch)}</p>
-        <span class="chips"><span class="chip">${s.segments.length} créneaux</span><span class="chip">4 concurrents</span><span class="chip">Seuil antitrust ${pct(s.params.cap, 0)}</span></span>
+        <span class="chips">${s.difficulty ? `<span class="chip on">${esc(s.difficulty)}</span>` : ""}<span class="chip">${s.segments.length} créneaux</span><span class="chip">4 concurrents</span><span class="chip">Seuil antitrust ${pct(s.params.cap, 0)}</span></span>
       </button>`).join("")}</div>
   </section>
   <section class="section">
@@ -292,7 +303,7 @@
     <span>Dette<b>${M(co.loan ? co.loan.out : 0)}</b></span><span>Taux directeur<b>${pct(G.params.rate, 1)}</b></span><span>Rang<b>${rankOf(co)}/${G.companies.length}</b></span>
     ${S.sel.timer && !over ? `<span>Temps<b class="timer" id="timer">—</b></span>` : ""}
   </div>
-  <nav class="tabs" role="tablist" aria-label="Rubriques">${tabs.map(([id, l]) => `<button class="tab" role="tab" id="tab-${id}" aria-selected="${S.tab === id}" data-act="tab" data-tab="${id}">${l}</button>`).join("")}</nav>
+  <nav class="tabs" role="tablist" aria-label="Rubriques">${tabs.map(([id, l]) => `<button class="tab" role="tab" id="tab-${id}" aria-selected="${S.tab === id}" aria-controls="panel" tabindex="${S.tab === id ? 0 : -1}" data-act="tab" data-tab="${id}">${l}</button>`).join("")}</nav>
 </div></div>
 <main class="wrap" id="panel" role="tabpanel" aria-labelledby="tab-${S.tab}">${renderTab()}</main>
 ${over ? `<div class="footer-bar"><div class="wrap"><div class="sum"><span>Partie terminée. Score final <b>${fmt(h.score, 2)}</b>.</span></div><div class="row"><button class="btn ghost" data-act="replay">Rejouer cette graine</button><button class="btn primary" data-act="new">Nouvelle partie</button></div></div></div>`
@@ -461,7 +472,7 @@ ${S.result ? renderSheet() : ""}`;
   function listingsBlock(co) {
     const G = S.G, p = G.params;
     const mine = G.listings.filter(l => l.seller === co.id);
-    const theirs = G.listings.filter(l => l.seller !== co.id && E.coById(G, l.seller).alive && E.coById(G, l.seller).div[l.seg]);
+    const theirs = G.listings.filter(l => l.seller !== co.id && (E.coById(G, l.seller).alive || l.liq) && E.coById(G, l.seller).div[l.seg]);
     let html = "";
     mine.forEach(l => { html += `<div class="news-item"><div class="eyebrow">Votre cession</div><p>« ${esc(segOf(l.seg).name)} » est en vente avec un prix minimal de ${M(l.minPrice)}. Résultat à la clôture.</p></div>`; });
     if (!theirs.length) html += `<p class="muted small">Aucune division concurrente n'est à vendre actuellement.</p>`;
@@ -471,7 +482,7 @@ ${S.result ? renderSheet() : ""}`;
       const comb = (own ? own.share : 0) + d.share;
       const blocked = comb > p.cap;
       const margin = d.rev > 0 ? d.ebit / d.rev : 0;
-      return `<article class="seg-card"><header><h3>${esc(seg.name)}</h3><span class="chip">${esc(seller.name)}</span></header>
+      return `<article class="seg-card"><header><h3>${esc(seg.name)}</h3><span class="chip">${l.liq ? "Liquidation · " : ""}${esc(seller.name)}</span></header>
         <dl class="facts"><div><dt>Part</dt><dd>${pct(d.share)}</dd></div><div><dt>Marge op.</dt><dd class="${margin < 0 ? "bad" : ""}">${pct(margin)}</dd></div><div><dt>Actifs</dt><dd>${M(d.A)}</dd></div>
         <div><dt>Prix minimal</dt><dd>${M(l.minPrice)}</dd></div><div><dt>Croissance</dt><dd>${pct(seg.g)}</dd></div><div><dt>Part cumulée</dt><dd class="${blocked ? "bad" : ""}">${pct(comb)}</dd></div></dl>
         ${blocked ? `<p class="small bad">Rachat interdit : la part cumulée dépasserait le seuil de ${pct(p.cap, 0)}.</p>` : `<div class="inv-line"><label for="bid-${l.id}">Votre offre (M€)</label><input id="bid-${l.id}" type="number" min="0" step="1" inputmode="decimal" data-k="bid" data-lid="${l.id}" value="${Math.round(S.draft.bids[l.id] || 0)}"></div>
@@ -491,6 +502,7 @@ ${S.result ? renderSheet() : ""}`;
   function updateDerived() {
     const G = S.G, co = player(), h = lastH(co), d = S.draft, p = G.params;
     if (!d) return;
+    const est = estimate();
     // effets par division
     for (const sid in co.div) {
       const dv = co.div[sid], seg = segOf(sid);
@@ -499,7 +511,9 @@ ${S.result ? renderSheet() : ""}`;
       const K1 = ((dv.A - dis) * (1 - seg.dep) + inv) / seg.capex;
       const share = K1 / Math.max(1e-9, seg.S - dv.K + K1);
       const c = E.unitCost(G, co, seg);
-      setText("eff-" + sid, (dis > 0 ? `Trésorerie récupérée ${M(disCash(co, sid, dis))} (moins-value ${M(dis - disCash(co, sid, dis))}) · ` : "") + `Capacité ${fmt(dv.K)} → ${fmt(K1)} (${sign(K1 / Math.max(1e-9, dv.K) - 1, x => pct(x, 0))}) · part potentielle ≈ ${pct(share, 0)} · coût unitaire ${fmt(c, 3)} pour un prix de ${fmt(seg.P, 3)}`);
+      const pd = est.pv && est.pv.co.div[sid];
+      const outlook = pd && pd.rev > 0 ? `aperçu : part ${pct(pd.share, 0)}, marge ${pct(pd.ebit / pd.rev, 0)}` : `part potentielle ≈ ${pct(share, 0)}`;
+      setText("eff-" + sid, (dis > 0 ? `Trésorerie récupérée ${M(disCash(co, sid, dis))} (moins-value ${M(dis - disCash(co, sid, dis))}) · ` : "") + `Capacité ${fmt(dv.K)} → ${fmt(K1)} (${sign(K1 / Math.max(1e-9, dv.K) - 1, x => pct(x, 0))}) · ${outlook} · coût unitaire ${fmt(c, 3)} pour un prix de ${fmt(seg.P, 3)}`);
     }
     setText("payout-v", pct(d.payout, 0));
     setText("payout-amt", M(d.payout * Math.max(0, h.npRec)));
@@ -513,13 +527,12 @@ ${S.result ? renderSheet() : ""}`;
         setText("loan-tot", M(E.loanTotal(amt, r, yrs)) + " sur " + yrs + " ans");
       } else { setText("loan-rate", pct(E.loanRate(G, co, Math.max(1, ml * 0.5)), 2) + " (indicatif)"); setText("loan-tot", "—"); }
     }
-    const est = estimate();
     setText("issue-v", pct(d.issuePct, 0)); setText("issue-amt", M(est.issue));
     setText("buyback-v", pct(d.buybackPct, 0)); setText("buyback-amt", M(est.buy));
     const sum = document.getElementById("sum");
     if (sum) {
       const msg = est.lvl === "bad" ? "Risque de cessation de paiements" : est.lvl === "warn" ? "Découvert utilisé" : "Trésorerie positive";
-      sum.innerHTML = `<span>Investissements <b>${M(est.inv)}</b></span>${est.dis > 0 ? `<span>Désinvestissements <b>${M(est.dis)}</b></span>` : ""}<span><i class="sig ${est.lvl === "good" ? "" : est.lvl}"></i>Trésorerie fin ${yearOf(G.year + 1)} estimée <b class="${est.lvl === "good" ? "" : est.lvl}">${M(est.end)}</b></span><span class="muted">${msg} · découvert autorisé ${M(est.limit)}</span>`;
+      sum.innerHTML = `<span>Investissements <b>${M(est.inv)}</b></span>${est.dis > 0 ? `<span>Désinvestissements <b>${M(est.dis)}</b></span>` : ""}<span><i class="sig ${est.lvl === "good" ? "" : est.lvl}"></i>Trésorerie fin ${yearOf(G.year + 1)} estimée <b class="${est.lvl === "good" ? "" : est.lvl}">${M(est.end)}</b></span>${est.pv && est.pv.co.alive ? `<span title="Aperçu : conjoncture sans aléa, concurrents qui investissent au rythme de leur marché">Cours estimé <b>${EUR(est.pv.h.price)}</b></span>` : ""}<span class="muted">${msg} · découvert autorisé ${M(est.limit)} · aperçu sans aléa, concurrents au rythme du marché</span>`;
     }
     const btn = document.getElementById("validate");
     if (btn) btn.textContent = S.confirmRisk ? "Confirmer malgré le risque" : "Valider l'exercice " + yearOf(G.year + 1);
@@ -613,7 +626,7 @@ ${S.result ? renderSheet() : ""}`;
     const rows = list.map((c, i) => {
       const h = lastH(c), m = h.rev ? h.ebit / h.rev : 0, de = h.equity > 0 ? h.debt / h.equity : 0;
       return `<tr class="${c.player ? "me" : ""} ${c.alive ? "" : "dead"}"><td>${i + 1}. <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</td><td>${fmt(h.score, 2)}</td><td>${EUR(h.price)}</td><td>${EUR(E.sum(c.dps))}</td>
-      <td>${M(h.rev)}</td><td class="${h.npRec < 0 ? "bad" : ""}">${M(h.npRec)}</td><td>${pct(m)}</td><td>${M(h.cash)}</td><td>${fmt(de, 2)}</td><td>${Object.keys(c.div).length}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
+      <td>${M(h.rev)}</td><td class="${h.npRec < 0 ? "bad" : ""}">${M(h.npRec)}</td><td>${pct(m)}</td><td>${M(h.cash)}</td><td>${fmt(de, 2)}</td><td>${c.alive ? Object.keys(c.div).length : 0}</td><td>${c.alive ? "" : "Faillite " + yearOf(c.bankrupt)}</td></tr>`;
     }).join("");
     const chart = lineChart(G.companies.map(c => ({ label: c.name.split(" ")[0], color: c.color, w: c.player ? 2.8 : 1.6, pts: c.hist.map(x => [yearOf(x.t), x.score]) })), { aria: "Évolution des scores", h: 260, fy: v => fmt(v, 0) });
     return `<section class="section"><div class="section-head"><h2>Classement</h2><span class="muted small">Score = cours + dividendes cumulés par action</span></div>
@@ -656,6 +669,7 @@ ${S.result ? renderSheet() : ""}`;
 <div><h3>Régulation et risques</h3><ul>
 <li>Au-delà du seuil de position dominante (${pct(p.cap, 0)} ici), l'investissement d'une division est limité au maintien de ses actifs, tout rachat qui ferait franchir ce seuil est interdit, et ses tarifs sont régulés : en pénurie, elle vend au prix d'équilibre, sans la hausse dont profitent ses concurrents.</li>
 <li>Le banquier accorde un découvert d'environ ${pct(p.overdraft, 0)} du chiffre d'affaires. Si la trésorerie de clôture passe en dessous, la société est en cessation de paiements : la partie s'arrête.</li>
+<li>Une société en faillite quitte le marché ; le liquidateur met ses divisions en vente l'exercice suivant, au prix minimal de 20 % de leurs actifs. Sans repreneur, les capacités sont démantelées.</li>
 <li>La banque centrale fait évoluer son taux directeur ; les emprunts en cours restent à taux fixe.</li></ul></div>
 <div><h3>Concurrents</h3><p>Quatre sociétés pilotées par l'ordinateur, chacune avec sa propre philosophie (défense du métier, conquête de parts, rente, diversification, opportunisme). Elles réagissent aux pénuries, aux surcapacités et aux mises en vente. Leurs profils sont révélés à la fin de la partie.</p></div>
 <div><h3>Lire la matrice</h3><p>En abscisse, la part de marché relative (votre part divisée par celle du premier concurrent ; 1 = égalité avec le leader). En ordonnée, la croissance du créneau. Elle sert à équilibrer le portefeuille : les vaches à lait financent les vedettes et les dilemmes que l'on a choisi de transformer en vedettes.</p></div>
@@ -699,6 +713,24 @@ ${S.result ? renderSheet() : ""}`;
   }
 
   /* ---------------- Feuille de résultats ---------------- */
+  function bridgeBlock(co) {
+    const b = E.priceBridge(co);
+    if (!b) return "";
+    const eu = x => sign(x, v => fmt(v, 2)) + " €";
+    const line = (k, v, sub) => `<div class="kv ${sub ? "sub" : ""}"><span>${k}</span><span class="num ${v < -0.005 ? "bad" : v > 0.005 ? "good" : ""}">${eu(v)}</span></div>`;
+    const divs = Object.keys(b.divs).map(sid => [segOf(sid).name, b.divs[sid]]).filter(x => Math.abs(x[1]) >= 0.005).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]));
+    const f = b.flows;
+    const cash = [["Autofinancement", f.caf], ["Investissements", f.inv], ["Dividendes versés", f.div], ["Cessions et acquisitions", f.ma], ["Capital (émission − rachat)", f.capital]].filter(x => Math.abs(x[1]) >= 0.005);
+    return `<details class="bridge"><summary><b>Pourquoi le score a bougé</b> <span class="muted small">par action</span></summary>
+  <div class="bridge-body">
+    ${line("Valeur des divisions", E.sum(divs, x => x[1]))}${divs.map(x => line(esc(x[0]), x[1], true)).join("")}
+    ${line("Trésorerie nette", b.netCash)}${cash.map(x => line(x[0], x[1], true)).join("")}
+    ${Math.abs(b.shares) >= 0.005 ? line("Nombre d'actions", b.shares) : ""}${Math.abs(b.rest) >= 0.005 ? line("Plancher de valorisation (fonds propres)", b.rest) : ""}
+    ${line("Dividende de l'exercice", b.dps)}
+    <div class="kv total"><span>Variation du score</span><span class="num">${eu(b.dScore)}</span></div>
+    <p class="small muted">Investir fait baisser la trésorerie nette tout de suite ; la valeur des divisions ne suit que si l'investissement rapporte. Emprunter ne change pas la trésorerie nette.</p>
+  </div></details>`;
+  }
   function renderSheet() {
     const G = S.G, R = S.result, co = player();
     const h = lastH(co), h0 = co.hist[co.hist.length - 2] || h;
@@ -706,7 +738,7 @@ ${S.result ? renderSheet() : ""}`;
     const rk = R.ranking;
     const pos = rk.findIndex(x => x.player) + 1;
     const ma = R.ma.filter(m => m.player).map(m => m.buyer ? `${m.buyer} rachète « ${m.seg} » à ${m.seller} pour ${M(m.amt)}.` : null).filter(Boolean);
-    const notes = R.notes.concat(ma).concat(R.bankrupt.filter(n => n !== co.name).map(n => `${n} fait faillite : ses capacités quittent le marché.`));
+    const notes = R.notes.concat(ma).concat(R.bankrupt.filter(n => n !== co.name).map(n => `${n} fait faillite : ses capacités quittent le marché et ses divisions seront vendues par le liquidateur.`));
     const nextNews = !G.over ? G.news : [];
     const bankrupt = G.bankrupt;
     return `<div class="sheet-back"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rs-title">
@@ -717,6 +749,7 @@ ${S.result ? renderSheet() : ""}`;
     <div><div class="muted small">Rang</div><div class="big-score" style="font-size:1.8rem">${pos}<span class="muted" style="font-size:1rem">/${rk.length}</span></div></div>
   </div>
   <div class="statgrid">${stat("Chiffre d'affaires", M(h.rev))}${stat("Résultat opérationnel", M(h.ebit), h.ebit < 0 ? "bad" : "")}${stat("Résultat net", M(h.np), h.np < 0 ? "bad" : "")}${stat("Dividendes", M(h.dividends))}${stat("Investissements", M(h.inv))}${stat("Trésorerie", M(h.cash), h.cash < 0 ? "bad" : "")}${stat("Dette", M(h.debt))}${stat("Cours", EUR(h.price))}</div>
+  ${bankrupt ? "" : bridgeBlock(co)}
   ${notes.length ? `<div><b>À noter</b><ul class="notes">${notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}
   <div><b>Classement</b><div class="rank-list">${rk.map((x, i) => { const c = E.coById(G, x.id); return `<div class="rank-row ${x.player ? "me" : ""}"><span>${i + 1}.</span><span><i class="dot" style="background:${c.color}"></i>${esc(x.name)}${x.alive ? "" : ' <span class="bad small">faillite</span>'}</span><span class="num">${fmt(x.score, 2)}</span></div>`; }).join("")}</div></div>
   ${nextNews.length ? `<div><b>À l'ordre du jour de ${yearOf(G.year + 1)}</b><div class="news" style="margin-top:6px">${nextNews.map(n => `<div class="news-item"><div class="eyebrow">${esc(n.kind)}</div><p>${esc(n.text)}</p></div>`).join("")}</div></div>` : ""}
@@ -745,13 +778,16 @@ ${S.result ? renderSheet() : ""}`;
   function cfoTrim() {
     const d = S.draft, notes = [];
     if (Object.keys(d.bids).some(k => d.bids[k] > 0)) { d.bids = {}; notes.push("annulé vos offres de rachat"); }
-    let est = estimate();
+    const est = estimate();
     if (est.lvl === "bad" && est.inv > 0) {
-      // viser une trésorerie de clôture nulle : l'estimation repose sur le résultat de l'an dernier
-      const cut = Math.min(est.inv, -est.end);
-      const k = Math.max(0, 1 - cut / est.inv);
-      for (const sid in d.invest) d.invest[sid] = Math.floor((+d.invest[sid] || 0) * k);
-      notes.push("réduit les investissements de " + pct(1 - k, 0));
+      // plus grande fraction des investissements qui laisse, dans l'aperçu, une trésorerie positive
+      const base = Object.assign({}, d.invest);
+      const apply = k => { for (const sid in base) d.invest[sid] = Math.floor((+base[sid] || 0) * k); };
+      const safe = k => { apply(k); const e = estimate(); return e.lvl !== "bad" && e.end >= 0; };
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (safe(mid)) lo = mid; else hi = mid; }
+      apply(lo);
+      notes.push("réduit les investissements de " + pct(1 - lo, 0));
     }
     return notes.length ? "Temps écoulé : pour éviter la cessation de paiements, le directeur financier a " + notes.join(" et ") + "." : null;
   }
@@ -790,8 +826,24 @@ ${S.result ? renderSheet() : ""}`;
     timerH = setInterval(upd, 1000);
   }
 
+  /* Le rendu remplace tout le DOM : on retrouve l'élément qui avait le focus (par son id,
+     sinon par ses attributs data-*) pour le lui rendre, curseur compris. */
+  function focusKey(el) {
+    if (!el || el === document.body || !app.contains(el)) return null;
+    if (el.id) return "#" + CSS.escape(el.id);
+    const attrs = ["act", "sid", "k", "f", "id", "tab", "lid"].filter(a => el.dataset[a] != null);
+    return attrs.length ? attrs.map(a => `[data-${a}="${CSS.escape(el.dataset[a])}"]`).join("") : null;
+  }
   function render() {
+    const a = document.activeElement, key = focusKey(a);
+    const caret = a && typeof a.selectionStart === "number" && a.type === "text" ? a.selectionStart : null;
     if (!S.G) renderHome(); else renderGame();
+    if (S.result) return; // la feuille de résultats prend le focus
+    const el = key && app.querySelector(key);
+    if (el) {
+      el.focus({ preventScroll: true });
+      if (caret != null && typeof el.setSelectionRange === "function") try { el.setSelectionRange(caret, caret); } catch (e) { /* champ sans sélection */ }
+    }
   }
 
   app.addEventListener("click", ev => {
@@ -892,7 +944,29 @@ ${S.result ? renderSheet() : ""}`;
 
   window.addEventListener("resize", () => { if (!S.G) drawGuilloche(); });
   document.addEventListener("keydown", ev => {
-    if (ev.key === "Escape" && S.result) { const b = document.getElementById("close-sheet"); if (b) b.click(); }
+    if (S.result) {
+      if (ev.key === "Escape") { const b = document.getElementById("close-sheet"); if (b) b.click(); return; }
+      if (ev.key === "Tab") { // le focus reste dans la feuille de résultats
+        const sheet = document.querySelector(".sheet");
+        const f = sheet ? Array.from(sheet.querySelectorAll("button, [href], input, select, [tabindex]:not([tabindex='-1'])")) : [];
+        if (!f.length) return;
+        const i = f.indexOf(document.activeElement);
+        if (ev.shiftKey && i <= 0) { ev.preventDefault(); f[f.length - 1].focus(); }
+        else if (!ev.shiftKey && (i === -1 || i === f.length - 1)) { ev.preventDefault(); f[0].focus(); }
+      }
+      return;
+    }
+    // onglets : flèches, Début, Fin (motif ARIA tablist)
+    const t = ev.target;
+    if (t && t.classList && t.classList.contains("tab") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(ev.key)) {
+      const tabs = Array.from(app.querySelectorAll(".tab"));
+      const i = tabs.indexOf(t);
+      const j = ev.key === "Home" ? 0 : ev.key === "End" ? tabs.length - 1 : (i + (ev.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      ev.preventDefault();
+      S.tab = tabs[j].dataset.tab; render();
+      const nt = document.getElementById("tab-" + S.tab);
+      if (nt) { nt.focus(); nt.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+    }
   });
 
   /* ---------------- démarrage ---------------- */

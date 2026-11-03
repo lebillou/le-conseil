@@ -18,6 +18,8 @@ Ou ouvrir `index.html` dans un navigateur : le fichier est autonome, sans serveu
 - Dividende, emprunt bancaire, augmentation de capital, rachat d'actions.
 - Seuil de position dominante (investissement limité au maintien, tarifs régulés), faillite au-delà du découvert autorisé, événements de conjoncture.
 - Concurrents aux profils différents (gardien du métier, conquérant, rentier, diversifieur, opportuniste), révélés en fin de partie.
+- Aperçu de l'exercice avant validation (conjoncture sans aléa, concurrents au rythme de leur marché) et décomposition de la variation du cours par division dans le procès-verbal.
+- Faillite d'un concurrent : ses divisions sont vendues par le liquidateur l'exercice suivant.
 - Matrice BCG, comptes consolidés, journal, chronomètre optionnel, graine pour rejouer la même conjoncture.
 
 Score = cours + dividendes cumulés par action. La valeur de la société est la somme de ses divisions (PER sectoriel × résultat opérationnel normatif après impôt, avec un plancher en fraction des actifs qui dépend de la croissance du créneau), plus la trésorerie, moins la dette. Toutes les sociétés démarrent à 10 €. Les règles détaillées sont dans l'onglet « Règles » du jeu.

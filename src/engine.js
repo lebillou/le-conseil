@@ -81,6 +81,7 @@ var ENGINE = (function () {
   const SCENARIOS = [
     {
       id: "industrie",
+      difficulty: "Intermédiaire",
       title: "Groupe industriel diversifié",
       kicker: "Portefeuille hétérogène",
       pitch: "Vous présidez un groupe présent dans sept métiers, du carton d'emballage aux batteries stationnaires. Votre vache à lait, les pièces de moteurs thermiques, est condamnée à terme. Il faut choisir où concentrer les ressources avant qu'elle ne s'épuise.",
@@ -116,6 +117,7 @@ var ENGINE = (function () {
     },
     {
       id: "transport",
+      difficulty: "Intermédiaire",
       title: "Transport terrestre longue distance",
       kicker: "Challenger face aux opérateurs historiques",
       pitch: "Leader européen de l'autocar, vous pouvez entrer sur la grande vitesse ferroviaire que l'ouverture à la concurrence rend accessible. Les opérateurs historiques ont l'expérience et les moyens ; le régulateur leur interdit en revanche de renforcer leurs monopoles.",
@@ -155,6 +157,7 @@ var ENGINE = (function () {
     },
     {
       id: "froid",
+      difficulty: "Difficile",
       title: "Froid commercial européen",
       kicker: "Leader national face à la transition des fluides",
       pitch: "Leader français du meuble frigorifique, vous êtes présent partout en Europe mais rarement en tête. La réglementation sur les fluides frigorigènes condamne les vitrines HFC et fait exploser les centrales CO₂ transcritiques, où un concurrent nordique a pris de l'avance. Les services, peu capitalistiques, sont valorisés par le marché.",
@@ -313,19 +316,21 @@ var ENGINE = (function () {
   function valuation(G, co) {
     const tax = G.params.tax;
     let rev = 0, w = 0, assets = 0, ev = 0;
+    const parts = {};
     for (const sid in co.div) {
       const d = co.div[sid], seg = segById(G, sid), per = segPER(seg);
       rev += d.rev || 0; w += (d.rev || 0) * per; assets += d.A;
       // résultat normatif : moyenne des deux derniers exercices, pour lisser les à-coups
       const hh = d.hist || [], prev = hh.length >= 2 ? hh[hh.length - 2].ebit : d.ebit;
       const ebitN = 0.5 * ((d.ebit || 0) + (prev || 0));
-      ev += Math.max(per * ebitN * (1 - tax), assetFloor(G, seg) * d.A);
+      parts[sid] = Math.max(per * ebitN * (1 - tax), assetFloor(G, seg) * d.A);
+      ev += parts[sid];
     }
     const PER = rev > 0 ? w / rev : 10;
     const debt = co.loan ? co.loan.out : 0;
     const equity = assets + co.cash - debt;
     const value = Math.max(ev + co.cash - debt, 0.25 * Math.max(0, equity));
-    return { PER, equity, value, assets, debt, ev };
+    return { PER, equity, value, assets, debt, ev, parts };
   }
 
   /* ---------- Création d'une partie ---------- */
@@ -400,7 +405,7 @@ var ENGINE = (function () {
         t: 0, rev, ebit, dep, interest, intInc, tax, npRec, exc: 0, np: npRec, dividends: 0, inv: dep,
         cash: co.cash, debt: val.debt, equity: val.equity, assets: val.assets, value: val.value, PER: val.PER,
         price: val.value / co.shares, dps: 0, score: val.value / co.shares, shares: co.shares,
-        issue: 0, buyback: 0, ma: 0, payout: co.payout
+        issue: 0, buyback: 0, ma: 0, payout: co.payout, ev: val.ev, parts: val.parts
       });
     });
     genNews(G, 1);
@@ -480,6 +485,7 @@ var ENGINE = (function () {
 
   /* ---------- IA des concurrents ---------- */
   function aiDecide(G, co) {
+    if (G.preview) return neutralDecision(G, co);
     const p = G.params, t = G.year + 1, k = p.ai || 1;
     const P = Object.assign({}, PERSONAS[co.persona]);
     P.aggr *= k; P.push *= k; P.entry = Math.min(0.9, P.entry * k); P.odUse *= k;
@@ -493,7 +499,7 @@ var ENGINE = (function () {
     G.listings.forEach(L => {
       if (L.seller === co.id) return;
       const seller = coById(G, L.seller);
-      if (!seller.alive) return;
+      if (!seller.alive && !L.liq) return;
       const ld = seller.div[L.seg];
       if (!ld) return;
       const seg = segById(G, L.seg);
@@ -576,6 +582,47 @@ var ENGINE = (function () {
     return dec;
   }
 
+  /* ---------- Aperçu de l'exercice ----------
+     Hypothèses affichées au joueur : conjoncture sans aléa, concurrents qui investissent
+     ce qu'il faut pour garder leur part, sans entrée, cession ni rachat. L'aperçu ne révèle
+     donc ni l'aléa de demande ni les décisions réelles des concurrents. */
+  function neutralDecision(G, co) {
+    const dec = { invest: {}, disinvest: {}, divest: {}, payout: PERSONAS[co.persona] ? PERSONAS[co.persona].payout : 0.3, loan: null, issuePct: 0, buybackPct: 0, bids: {} };
+    for (const sid in co.div) dec.invest[sid] = investHints(G, co, sid).follow;
+    return dec;
+  }
+  function preview(G, playerDec) {
+    const H = JSON.parse(JSON.stringify(G));
+    H.preview = true;
+    H.segments.forEach(s => { s.vol = 0; });
+    H.listings = H.listings.filter(l => l.seller === H.companies.find(c => c.player).id);
+    const R = simulateYear(H, playerDec);
+    const co = H.companies.find(c => c.player);
+    return { G: H, R, co, h: lastH(co) };
+  }
+
+  /* ---------- Décomposition de la variation du cours ----------
+     Exacte : Δcours = Σ divisions Δvaleur / N₀ + Δtrésorerie nette / N₀ + effet du nombre
+     d'actions + reste (plancher de fonds propres). */
+  function priceBridge(co) {
+    const H = co.hist, n = H.length;
+    if (n < 2) return null;
+    const h1 = H[n - 1], h0 = H[n - 2], N0 = h0.shares, N1 = h1.shares;
+    if (!h1.parts || !h0.parts) return null;
+    const divs = {};
+    const ids = new Set(Object.keys(h0.parts).concat(Object.keys(h1.parts)));
+    ids.forEach(sid => { divs[sid] = ((h1.parts[sid] || 0) - (h0.parts[sid] || 0)) / N0; });
+    const flows = {
+      caf: (h1.npRec + h1.dep) / N0, inv: -h1.inv / N0, div: -h1.dividends / N0,
+      ma: ((h1.ma || 0) + (h1.disinv || 0)) / N0, capital: ((h1.issue || 0) - (h1.buyback || 0)) / N0
+    };
+    const nc0 = h0.cash - h0.debt, nc1 = h1.cash - h1.debt;
+    const V1 = h1.value;
+    const shares = V1 / N1 - V1 / N0;
+    const rest = (h1.price - h0.price) - (sum(Object.values(divs)) + (nc1 - nc0) / N0 + shares);
+    return { divs, flows, netCash: (nc1 - nc0) / N0, shares, rest, dPrice: h1.price - h0.price, dps: h1.dps, dScore: h1.score - h0.score };
+  }
+
   /* ---------- Nettoyage de la décision du joueur ---------- */
   function sanitize(G, co, dec) {
     dec = dec || {};
@@ -622,14 +669,15 @@ var ENGINE = (function () {
     open.forEach(L => {
       const seller = coById(G, L.seller);
       const seg = segById(G, L.seg);
-      if (!seller.alive || !seller.div[L.seg]) return;
+      if ((!seller.alive && !L.liq) || !seller.div[L.seg]) return;
       const d = seller.div[L.seg];
+      const from = L.liq ? "le liquidateur de " + seller.name : seller.name;
       let best = null;
       alive.forEach(b => {
         if (b.id === L.seller) return;
         const amt = (decs[b.id].bids || {})[L.id];
         if (!(amt > 0)) return;
-        if (amt < L.minPrice) { if (b.player) R.notes.push("Votre offre sur « " + seg.name + " » (" + fmt(amt) + " M€) est inférieure au prix minimal fixé par " + seller.name + "."); return; }
+        if (amt < L.minPrice) { if (b.player) R.notes.push("Votre offre sur « " + seg.name + " » (" + fmt(amt) + " M€) est inférieure au prix minimal fixé par " + from + "."); return; }
         if (b.cash < amt) { if (b.player) R.notes.push("Offre sur « " + seg.name + " » annulée : trésorerie insuffisante au moment du règlement."); return; }
         const bd = b.div[L.seg];
         if ((bd ? bd.share : 0) + d.share > p.cap) { if (b.player) R.notes.push("L'autorité de la concurrence bloque votre rachat de « " + seg.name + " » : la part cumulée dépasserait " + pct(p.cap) + "."); return; }
@@ -637,14 +685,17 @@ var ENGINE = (function () {
       });
       if (best) {
         const b = best.b, amt = best.amt;
-        seller.cash += amt; seller._exc += amt - d.A; seller._ma += amt; seller._sold[L.seg] = true;
+        if (!L.liq) { seller.cash += amt; seller._exc += amt - d.A; seller._ma += amt; seller._sold[L.seg] = true; }
         delete seller.div[L.seg];
         b.cash -= amt; b._ma -= amt;
         const bd = b.div[L.seg];
         if (bd) { bd.K += d.K; bd.A += d.A; bd.X += d.X; bd.share += d.share; }
         else b.div[L.seg] = { K: d.K, A: d.A, X: d.X, share: d.share, rs: d.rs, lossYears: 0, unsold: 0, depT: d.depT, inv: 0, entered: t, hist: [] };
         R.ma.push({ seg: seg.name, seller: seller.name, buyer: b.name, amt, A: d.A, player: seller.player || b.player });
-        G.log.push({ t, kind: "cession", text: b.name + " rachète « " + seg.name + " » à " + seller.name + " pour " + fmt(amt) + " M€ (actifs : " + fmt(d.A) + " M€)." });
+        G.log.push({ t, kind: "cession", text: b.name + " rachète « " + seg.name + " » à " + from + " pour " + fmt(amt) + " M€ (actifs : " + fmt(d.A) + " M€)." });
+      } else if (L.liq) {
+        delete seller.div[L.seg];
+        G.log.push({ t, kind: "cession", text: "Aucun repreneur pour « " + seg.name + " » de " + seller.name + " : les capacités sont démantelées." });
       } else {
         d.unsold = (d.unsold || 0) + 1;
         R.ma.push({ seg: seg.name, seller: seller.name, buyer: null, amt: 0, A: d.A, player: seller.player });
@@ -800,14 +851,20 @@ var ENGINE = (function () {
       co.hist.push({
         t, rev, ebit, dep, interest, intInc, tax, npRec, exc: co._exc, np, dividends, inv: co._inv,
         disinv: co._disinv, cash: co.cash, debt: val.debt, equity: val.equity, assets: val.assets, value: co.alive ? val.value : 0, PER: val.PER,
-        price, dps, score, shares: co.shares, issue: co._issue, buyback: co._buyback, ma: co._ma, payout: co.payoutUsed, repay
+        price, dps, score, shares: co.shares, issue: co._issue, buyback: co._buyback, ma: co._ma, payout: co.payoutUsed, repay,
+        ev: co.alive ? val.ev : 0, parts: co.alive ? val.parts : {}
       });
     });
-    // sociétés en faillite : capacités retirées du marché
+    // sociétés en faillite : capacités retirées du marché, divisions vendues par le liquidateur
+    // l'exercice suivant (prix minimal de 20 % des actifs), démantelées faute de repreneur
     G.companies.forEach(co => {
       if (!co.alive && co.bankrupt === t) {
-        co.div = {};
         G.listings = G.listings.filter(l => l.seller !== co.id);
+        for (const sid in co.div) {
+          const d = co.div[sid];
+          G.listings.push({ id: G.nextListingId++, seller: co.id, seg: sid, minPrice: Math.round(0.2 * d.A), t, liq: true });
+          G.log.push({ t, kind: "cession", text: "Le liquidateur de " + co.name + " met en vente « " + segById(G, sid).name + " » (prix minimal " + fmt(0.2 * d.A) + " M€)." });
+        }
       }
     });
     alive.forEach(co => { delete co._sold; });
@@ -846,7 +903,7 @@ var ENGINE = (function () {
   }
 
   return {
-    VERSION, SCENARIOS, disinvestRate, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
+    VERSION, SCENARIOS, disinvestRate, aiDecide, preview, priceBridge, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
     forecastGrowth, quadrant, segPER, assetFloor, segById, coById, lastH, valuation, pathGrowth, unitCost, fmt, pct, clamp, sum, sanitize
   };
 })();

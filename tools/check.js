@@ -87,28 +87,55 @@ function play(sc, seed, strat) {
   }
 }
 
-/* 5. Pas de rente de pénurie pour une société au-delà du seuil de position dominante */
+/* 5. Pas de rente de pénurie pour une société au-delà du seuil de position dominante.
+   Cas construit : demande de la grande vitesse allemande +30 % d'un coup, Bahnwerk à 90 %. */
 {
-  for (let seed = 1; seed <= 5; seed++) {
-    const G = play("transport", seed, (G, co) => E.defaultDecision(G, co));
-    G.companies.filter(c => c.alive).forEach(c => {
-      for (const sid in c.div) {
-        const d = c.div[sid], seg = E.segById(G, sid);
-        if (d.share >= G.params.cap && seg.r < 1 && d.q > 0) {
-          ok(d.rev / d.q <= seg.P + 1e-9 && d.rev / d.q < seg.P, `transport graine ${seed} ${c.name} ${sid} : prix de pénurie facturé par une société dominante`);
-        }
-      }
-    });
-  }
+  const G = E.newGame("transport", { seed: 1 });
+  const seg = E.segById(G, "gvde");
+  seg.gShift += 0.30;
+  E.simulateYear(G, E.defaultDecision(G, G.companies.find(c => c.player)));
+  ok(seg.r < 0.9, `cas de pénurie non obtenu (offre/demande ${seg.r.toFixed(2)})`);
+  const B = E.coById(G, "B"), dB = B.div.gvde;
+  ok(dB.share >= G.params.cap, "Bahnwerk devrait rester au-delà du seuil");
+  ok(dB.rev / dB.q < seg.P * 0.99, "la société dominante facture le prix de pénurie");
+  const others = G.companies.filter(c => c !== B && c.alive && c.div.gvde && c.div.gvde.q > 0);
+  ok(others.length > 0 && others.every(c => Math.abs(c.div.gvde.rev / c.div.gvde.q - seg.P) < 1e-9), "les autres sociétés doivent vendre au prix de marché");
 }
 
-/* 6. Calibrage : décider doit compter. Le recentrage bat la passivité dans chaque scénario. */
+/* 6. Faillite d'un concurrent : divisions mises en vente par le liquidateur, résolues l'exercice suivant */
+{
+  let seen = 0;
+  for (const sc of E.SCENARIOS) for (let seed = 1; seed <= 30 && seen < 3; seed++) {
+    const G = E.newGame(sc.id, { seed });
+    const co = G.companies.find(c => c.player);
+    while (!G.over) {
+      E.simulateYear(G, E.defaultDecision(G, co));
+      G.companies.filter(c => !c.alive && c.bankrupt === G.year).forEach(c => {
+        seen++;
+        const n = Object.keys(c.div).length;
+        ok(G.listings.filter(l => l.seller === c.id && l.liq).length === n, `${sc.id} ${c.name} : chaque division doit être mise en vente`);
+        if (!G.over) {
+          E.simulateYear(G, E.defaultDecision(G, co));
+          ok(Object.keys(c.div).length === 0, `${sc.id} ${c.name} : divisions non soldées un exercice après la faillite`);
+          ok(!G.listings.some(l => l.seller === c.id), `${sc.id} ${c.name} : annonces de liquidation encore ouvertes`);
+        }
+      });
+    }
+  }
+  ok(seen > 0, "aucune faillite de concurrent observée : test de liquidation vide");
+}
+
+/* 7. Calibrage : décider doit compter. Le recentrage bat la passivité dans chaque scénario. */
 {
   for (const sc of E.SCENARIOS) {
     const S = strategies(sc.id);
     const pa = evaluate(sc.id, 20, S.passif), re = evaluate(sc.id, 20, S.recentre);
     ok(re.score >= pa.score - 0.1, `${sc.id} : la passivité (${pa.score.toFixed(1)}) bat le recentrage (${re.score.toFixed(1)})`);
     ok(re.bk === 0, `${sc.id} : le recentrage fait faillite`);
+    // gagnable : au moins une stratégie du banc fait mieux que le hasard entre cinq sociétés
+    // (20 % de victoires, rang moyen 3)
+    const res = Object.keys(S).map(k => evaluate(sc.id, 20, S[k]));
+    ok(res.some(r => r.wins >= 0.2 || r.rank < 3), `${sc.id} : aucune stratégie du banc ne fait mieux que le hasard`);
   }
 }
 
