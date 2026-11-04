@@ -125,7 +125,32 @@ function play(sc, seed, strat) {
   ok(seen > 0, "aucune faillite de concurrent observée : test de liquidation vide");
 }
 
-/* 7. Calibrage : décider doit compter. Le recentrage bat la passivité dans chaque scénario. */
+/* 7. Rejeu : rejouer une graine avec la stratégie suivie reproduit exactement la partie,
+   pour chaque niveau ; le cours de départ vaut 10 € quel que soit le niveau */
+{
+  const ST = require("../src/strategies.js");
+  for (const sc of E.SCENARIOS) for (const level of Object.keys(E.LEVELS)) {
+    const strat = ST.list(sc.id).find(x => x.key === "recentre").fn;
+    const G = E.newGame(sc.id, { seed: 11, years: 10, level });
+    ok(Math.abs(E.lastH(G.companies.find(c => c.player)).price - 10) < 1e-9, `${sc.id} ${level} : cours initial ≠ 10`);
+    const co = G.companies.find(c => c.player);
+    while (!G.over) E.simulateYear(G, strat(G, co));
+    const r = ST.replay(G, strat);
+    ok(Math.abs(r.score - E.lastH(co).score) < 1e-9, `${sc.id} ${level} : le rejeu ne reproduit pas la partie (${r.score} ≠ ${E.lastH(co).score})`);
+  }
+  const ranks = {};
+  for (const level of ["facile", "difficile"]) {
+    let tot = 0;
+    for (const sc of E.SCENARIOS) {
+      const S = strategies(sc.id);
+      tot += Math.min(...Object.keys(S).map(k => evaluate(sc.id, 10, S[k], level).rank));
+    }
+    ranks[level] = tot / E.SCENARIOS.length;
+  }
+  ok(ranks.facile < ranks.difficile, `le niveau facile n'est pas plus facile (meilleur rang moyen ${ranks.facile.toFixed(2)} contre ${ranks.difficile.toFixed(2)})`);
+}
+
+/* 8. Calibrage : décider doit compter. Le recentrage bat la passivité dans chaque scénario. */
 {
   for (const sc of E.SCENARIOS) {
     const S = strategies(sc.id);
