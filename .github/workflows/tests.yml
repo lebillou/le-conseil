@@ -16,3 +16,8 @@ jobs:
         run: |
           python3 build.py
           git diff --exit-code -- index.html || (echo "index.html n'est pas à jour : lancer python3 build.py" && exit 1)
+      - name: Tests d'interface
+        run: |
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+          node tools/ui_test.js

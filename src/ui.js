@@ -18,7 +18,7 @@
 
   const S = {
     G: null, draft: null, q: {}, tab: "conseil", result: null, matrixCo: "P", confirmRisk: false,
-    sel: { scenario: "industrie", years: 15, timer: 0, name: "", seed: "" }, deadline: 0
+    sel: { scenario: "industrie", years: 15, timer: 0, name: "", seed: "", level: "normal" }, deadline: 0, refs: null
   };
 
   /* ---------------- utilitaires ---------------- */
@@ -206,7 +206,9 @@
       boxes.push([x - w / 2, y - hgt + 3, x + w / 2, y + 3]);
       labels.push(`<text x="${x}" y="${y}" text-anchor="middle" font-size="11" style="fill:var(--ink)">${esc(txt)}</text>`);
     });
-    s += circles.join("") + labels.join("");
+    // les bulles sont découpées au cadre du graphique (une part relative extrême les poussait au-delà)
+    s += `<defs><clipPath id="bcg-clip"><rect x="${ml}" y="${mt}" width="${W - ml - mr}" height="${H - mt - mb}"/></clipPath></defs>`;
+    s += `<g clip-path="url(#bcg-clip)">${circles.join("")}</g>` + labels.join("");
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Matrice part de marché relative et croissance de ${esc(co.name)}">${s}</svg>`;
   }
 
@@ -275,11 +277,12 @@
     <div class="section-head"><h2>Conditions de séance</h2></div>
     <div class="opts">
       <div class="field"><label for="o-years">Durée du mandat</label><select id="o-years" data-o="years">${[10, 15, 20].map(y => `<option value="${y}" ${S.sel.years === y ? "selected" : ""}>${y} exercices</option>`).join("")}</select></div>
+      <div class="field"><label for="o-level">Niveau</label><select id="o-level" data-o="level">${Object.keys(E.LEVELS).map(k => `<option value="${k}" ${S.sel.level === k ? "selected" : ""}>${E.LEVELS[k].label}</option>`).join("")}</select></div>
       <div class="field"><label for="o-timer">Temps par exercice</label><select id="o-timer" data-o="timer">${[[0, "Illimité"], [180, "3 minutes"], [300, "5 minutes"]].map(([v, l]) => `<option value="${v}" ${S.sel.timer === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="field"><label for="o-name">Nom de votre société</label><input id="o-name" type="text" data-o="name" maxlength="32" placeholder="${esc(sc.find(s => s.id === S.sel.scenario).companies[0].name)}" value="${esc(S.sel.name)}"></div>
       <div class="field"><label for="o-seed">Graine (facultatif)</label><input id="o-seed" type="number" data-o="seed" inputmode="numeric" placeholder="Aléatoire" value="${esc(S.sel.seed)}"></div>
     </div>
-    <p class="small muted">Une même graine rejoue exactement la même conjoncture : utile pour comparer deux stratégies.</p>
+    <p class="small muted">Niveau ${esc((E.LEVELS[S.sel.level] || E.LEVELS.normal).label.toLowerCase())} : ${esc((E.LEVELS[S.sel.level] || E.LEVELS.normal).desc)} Une même graine rejoue exactement la même conjoncture : utile pour comparer deux stratégies.</p>
   </section>
   <div class="row"><button class="btn seal" data-act="start">Prendre la présidence</button></div>
 </main>`;
@@ -298,7 +301,7 @@
     app.innerHTML = `
 <div class="topbar"><div class="wrap">
   <div class="topline">
-    <div class="row" style="gap:8px"><span class="mini-brand">Le <em>Conseil</em></span><span class="muted small">${esc(co.name)} · ${esc(G.title)}</span></div>
+    <div class="row" style="gap:8px"><span class="mini-brand">Le <em>Conseil</em></span><span class="muted small">${esc(co.name)} · ${esc(G.title)}${G.level && G.level !== "normal" ? " · niveau " + esc(E.LEVELS[G.level].label.toLowerCase()) : ""}</span></div>
     <div class="exercise">${over ? "Mandat achevé" : `Exercice <b>${yearOf(t)}</b> · ${t}/${G.T}`}</div>
   </div>
   <div class="kpis">
@@ -643,7 +646,7 @@ ${S.result ? renderSheet() : ""}`;
     const G = S.G, by = {};
     G.log.forEach(e => { (by[e.t] = by[e.t] || []).push(e); });
     const ts = Object.keys(by).map(Number).sort((a, b) => b - a);
-    return `<section class="section"><div class="section-head"><h2>Journal des séances</h2></div><div class="log">${ts.map(t => `<div class="log-year"><h3>Exercice ${yearOf(t)}</h3><ul>${by[t].map(e => `<li><span class="eyebrow">${esc(e.kind)}</span> ${esc(e.text)}</li>`).join("")}</ul></div>`).join("") || '<p class="muted">Rien à signaler pour l\'instant.</p>'}</div></section>`;
+    return `<section class="section"><div class="section-head"><h2>Journal des séances</h2></div><div class="log">${ts.map(t => `<div class="log-year"><h3>Exercice ${yearOf(t)}</h3><ul>${by[t].map(e => `<li class="${e.kind === "vos décisions" ? "mine" : ""}"><span class="eyebrow">${esc(e.kind)}</span> ${esc(e.text)}</li>`).join("")}</ul></div>`).join("") || '<p class="muted">Rien à signaler pour l\'instant.</p>'}</div></section>`;
   }
 
   /* ---------------- Règles ---------------- */
@@ -679,6 +682,32 @@ ${S.result ? renderSheet() : ""}`;
 </section>`;
   }
 
+  /* ---------------- Comparaison aux stratégies de référence ----------------
+     Même scénario, même graine, même durée, même niveau : la conjoncture est identique,
+     seules les décisions changent (et les réactions des concurrents qui en découlent). */
+  function referenceRuns(G) {
+    const key = [G.sc, G.seed, G.T, G.level].join("|");
+    if (S.refs && S.refs.key === key) return S.refs.rows;
+    const rows = STRATEGIES.list(G.sc).map(x => Object.assign({ label: x.label, desc: x.desc }, STRATEGIES.replay(G, x.fn)));
+    S.refs = { key, rows };
+    return rows;
+  }
+  function referenceBlock(G, co, rank, n) {
+    let rows;
+    try { rows = referenceRuns(G); } catch (e) { return ""; }
+    const mine = { label: "Votre partie", desc: "", score: lastH(co).score, rank, bankrupt: G.bankrupt, me: true };
+    const eps = 1e-6; // égalité à l'arrondi près : même score, même place
+    const all = rows.concat([mine]).sort((a, b) => (b.score - a.score > eps ? 1 : a.score - b.score > eps ? -1 : (b.me ? 1 : 0) - (a.me ? 1 : 0)));
+    const better = rows.filter(r => r.score > mine.score + eps).length;
+    const pos = better + 1;
+    const lead = better === 0 ? "Aucune stratégie de référence ne fait mieux que vous sur cette conjoncture."
+      : `${better} stratégie${better > 1 ? "s" : ""} de référence sur ${rows.length} ${better > 1 ? "font" : "fait"} mieux que vous sur cette conjoncture.`;
+    return `<section class="section refs"><div class="section-head"><h2>Et avec une autre stratégie ?</h2><span class="muted small">Même conjoncture (graine ${G.seed}), mêmes concurrents ; seules les décisions changent</span></div>
+  <p>${lead} Votre partie se classe ${pos === 1 ? "1<sup>re</sup>" : pos + "<sup>e</sup>"} sur ${all.length}${rows.some(r => Math.abs(r.score - mine.score) <= eps) ? " (ex æquo)" : ""}.</p>
+  <div class="tbl-wrap"><table><thead><tr><th>Stratégie</th><th>Score</th><th>Rang final</th></tr></thead><tbody>${all.map(r => `<tr class="${r.me ? "me" : ""}"><td style="white-space:normal">${esc(r.label)}${r.desc ? `<div class="small muted" style="font-weight:400">${esc(r.desc)}</div>` : ""}</td><td>${fmt(r.score, 2)}</td><td>${r.bankrupt ? '<span class="bad">faillite</span>' : r.rank + "/" + n}</td></tr>`).join("")}</tbody></table></div>
+  <p class="small muted">Les concurrents réagissent aux décisions de chaque stratégie : leurs propres résultats changent d'une ligne à l'autre. Rejouez la graine pour tenter mieux.</p></section>`;
+  }
+
   /* ---------------- Bilan final ---------------- */
   function tabBilan() {
     const G = S.G, co = player(), h = lastH(co);
@@ -704,10 +733,11 @@ ${S.result ? renderSheet() : ""}`;
     const exits = G.log.filter(e => e.text.indexOf(co.name) === 0 && (/ferme/.test(e.text) || /quitte le créneau/.test(e.text))).length + G.log.filter(e => e.kind === "cession" && e.text.indexOf("à " + co.name + " pour") >= 0).length;
     const chart = lineChart(G.companies.map(c => ({ label: c.name.split(" ")[0], color: c.color, w: c.player ? 2.8 : 1.6, pts: c.hist.map(x => [yearOf(x.t), x.score]) })), { aria: "Évolution des scores", h: 260, fy: v => fmt(v, 0) });
     return `<section class="section podium">
-  <div><div class="eyebrow">Assemblée générale de clôture · ${esc(G.title)} · graine ${G.seed}</div><p class="verdict">${verdict}</p></div>
+  <div><div class="eyebrow">Assemblée générale de clôture · ${esc(G.title)} · graine ${G.seed} · niveau ${esc(E.LEVELS[G.level || "normal"].label.toLowerCase())}</div><p class="verdict">${verdict}</p></div>
   <div class="statgrid">${stat("Score final", fmt(h.score, 2))}${stat("Rendement total pour l'actionnaire", pct(tsr, 0), tsr < 0 ? "bad" : "good")}${stat("Rendement annuel moyen", pct(cagr, 1), cagr < 0 ? "bad" : "")}${stat("Chiffre d'affaires final", M(h.rev))}${stat("Résultat net courant final", M(h.npRec), h.npRec < 0 ? "bad" : "")}${stat("Dette finale", M(h.debt))}</div>
   <div class="tbl-wrap"><table><thead><tr><th>Société</th><th style="text-align:left">Profil</th><th>Score</th><th>Cours</th><th>Div. cumulés</th><th>CA final</th><th>RN final</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   <div class="panel">${chart}</div>
+  ${referenceBlock(G, co, rank, list.length)}
   <div class="fin-grid">
     <div class="panel"><b>Où sont allés vos investissements</b>${qbar}<p class="small muted">Position de la division au moment de chaque décision. Total investi : ${M(totInv)} ; ${entries} entrée${entries > 1 ? "s" : ""} sur un nouveau créneau, ${exits} sortie${exits > 1 ? "s" : ""}.</p></div>
     <div class="panel"><b>Profils des concurrents</b>${G.companies.filter(c => !c.player).map(c => `<p class="small"><b>${esc(c.name)}</b> — ${esc(E.PERSONAS[c.persona].label)} : ${esc(E.PERSONAS[c.persona].desc)}</p>`).join("")}</div>
@@ -766,7 +796,8 @@ ${S.result ? renderSheet() : ""}`;
   function startGame(opts) {
     clearInterval(timerH); timerH = null;
     const seed = opts.seed ? (Math.abs(parseInt(opts.seed, 10)) >>> 0) || 1 : ((Math.random() * 4294967295) >>> 0) || 7;
-    S.G = E.newGame(opts.scenario, { seed, years: opts.years, playerName: (opts.name || "").trim() || undefined });
+    S.G = E.newGame(opts.scenario, { seed, years: opts.years, level: opts.level, playerName: (opts.name || "").trim() || undefined });
+    S.refs = null;
     S.draft = freshDraft();
     S.tab = "conseil"; S.result = null; S.matrixCo = "P";
     openYear();
@@ -878,7 +909,7 @@ ${S.result ? renderSheet() : ""}`;
     if (act === "new") { clearSaved(); S.G = null; S.result = null; render(); window.scrollTo(0, 0); return; }
     if (act === "replay") {
       const G = S.G;
-      startGame({ scenario: G.sc, years: G.T, seed: String(G.seed), name: player().name === E.SCENARIOS.find(s => s.id === G.sc).companies[0].name ? "" : player().name });
+      startGame({ scenario: G.sc, years: G.T, level: G.level, seed: String(G.seed), name: player().name === E.SCENARIOS.find(s => s.id === G.sc).companies[0].name ? "" : player().name });
       return;
     }
     if (act === "dq") {
@@ -907,6 +938,7 @@ ${S.result ? renderSheet() : ""}`;
     if (el.dataset.o) {
       const k = el.dataset.o;
       S.sel[k] = (k === "years" || k === "timer") ? +el.value : el.value;
+      if (k === "level") renderHome();
       return;
     }
     const k = el.dataset.k;

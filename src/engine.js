@@ -311,6 +311,15 @@ var ENGINE = (function () {
     }
   ];
 
+  /* Niveaux de jeu : avantage ou handicap d'expérience de la société du joueur (coûts
+     unitaires plus bas ou plus hauts). Moduler l'agressivité des concurrents ne marchait
+     pas : moins agressifs, ils laissent leurs marchés en pénurie et gagnent davantage. */
+  const LEVELS = {
+    facile: { label: "Facile", playerX: 1.4, desc: "Vos équipes ont plus d'expérience que la concurrence : coûts unitaires plus bas." },
+    normal: { label: "Normal", playerX: 1, desc: "Mêmes conditions que les concurrents." },
+    difficile: { label: "Difficile", playerX: 0.75, desc: "Vos équipes ont moins d'expérience que la concurrence : coûts unitaires plus hauts." }
+  };
+
   const scenarioById = id => SCENARIOS.find(s => s.id === id);
   const segById = (G, id) => G.segments.find(s => s.id === id);
   const coById = (G, id) => G.companies.find(c => c.id === id);
@@ -342,6 +351,8 @@ var ENGINE = (function () {
       const s2 = segById(G, sid);
       if (s2.group === seg.group) x += G.params.groupX * co.div[sid].X / s2.Xnorm;
     }
+    // niveau de jeu : avantage (ou handicap) d'expérience de la société du joueur
+    if (co.player && G.params.playerX) x *= G.params.playerX;
     return Math.max(0.05, x);
   }
 
@@ -462,8 +473,9 @@ var ENGINE = (function () {
       mods: { g: {}, c: {} }, over: false, bankrupt: false, nextListingId: 1, results: []
     };
     G.params.rate0 = G.params.rate;
-    G.params.ai = { facile: 0.6, normal: 1, difficile: 1.3 }[opts.level || "normal"] || 1;
-    G.level = opts.level || "normal";
+    G.level = LEVELS[opts.level] ? opts.level : "normal";
+    G.params.playerX = LEVELS[G.level].playerX;
+    G.params.ai = 1;
     G.pinv = [];
     sc.segments.forEach(s => {
       const H = s.H || 8;
@@ -741,6 +753,24 @@ var ENGINE = (function () {
     return { divs, flows, netCash: (nc1 - nc0) / N0, shares, rest, dPrice: h1.price - h0.price, dps: h1.dps, dScore: h1.score - h0.score };
   }
 
+  /* ---------- Résumé lisible des décisions du joueur (journal) ---------- */
+  function decisionSummary(G, co, dec) {
+    const parts = [];
+    const inv = Object.keys(dec.invest).filter(sid => dec.invest[sid] > 0.5).sort((a, b) => dec.invest[b] - dec.invest[a]);
+    const tot = inv.reduce((a, sid) => a + dec.invest[sid], 0);
+    if (inv.length) parts.push("investissements " + fmt(tot) + " M€ (" + inv.slice(0, 4).map(sid => segById(G, sid).name + " " + fmt(dec.invest[sid])).join(", ") + (inv.length > 4 ? ", …" : "") + ")");
+    else parts.push("aucun investissement");
+    for (const sid in dec.disinvest) parts.push("désinvestissement de " + fmt(dec.disinvest[sid]) + " M€ dans « " + segById(G, sid).name + " »");
+    for (const sid in dec.divest) parts.push((dec.divest[sid].mode === "liq" ? "fermeture de « " : "mise en vente de « ") + segById(G, sid).name + " »");
+    parts.push("dividende " + pct(dec.payout, 0) + " du résultat");
+    if (dec.loan) parts.push("emprunt demandé " + fmt(dec.loan.amount) + " M€ sur " + dec.loan.years + " ans");
+    if (dec.issuePct > 0) parts.push("augmentation de capital " + pct(dec.issuePct, 0));
+    if (dec.buybackPct > 0) parts.push("rachat d'actions " + pct(dec.buybackPct, 0));
+    const bids = Object.keys(dec.bids);
+    if (bids.length) parts.push(bids.length + " offre" + (bids.length > 1 ? "s" : "") + " de rachat (" + fmt(bids.reduce((a, k) => a + dec.bids[k], 0)) + " M€)");
+    return parts.join(" ; ") + ".";
+  }
+
   /* ---------- Nettoyage de la décision du joueur ---------- */
   function sanitize(G, co, dec) {
     dec = dec || {};
@@ -777,6 +807,7 @@ var ENGINE = (function () {
     const alive = G.companies.filter(c => c.alive);
     const decs = {};
     alive.forEach(co => { decs[co.id] = co.player ? sanitize(G, co, playerDec) : aiDecide(G, co); });
+    alive.filter(co => co.player).forEach(co => G.log.push({ t, kind: "vos décisions", text: decisionSummary(G, co, decs[co.id]) }));
     alive.forEach(co => {
       co._exc = 0; co._cash0 = co.cash; co._loanOut0 = co.loan ? co.loan.out : 0; co._loanRate = co.loan ? co.loan.rate : 0;
       co._inv = 0; co._disinv = 0; co._issue = 0; co._buyback = 0; co._ma = 0; co._sold = {};
@@ -1021,7 +1052,7 @@ var ENGINE = (function () {
   }
 
   return {
-    VERSION, SCENARIOS, disinvestRate, aiDecide, preview, priceBridge, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
+    VERSION, SCENARIOS, LEVELS, disinvestRate, aiDecide, preview, priceBridge, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
     forecastGrowth, quadrant, segPER, assetFloor, segById, coById, lastH, valuation, pathGrowth, unitCost, fmt, pct, clamp, sum, sanitize
   };
 })();

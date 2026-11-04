@@ -246,6 +246,7 @@ svg text { font-family: var(--body); fill: var(--muted); }
 .log { display: grid; gap: 14px; }
 .log-year h3 { font-size: 1rem; margin-bottom: 6px; }
 .log-year ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 0.88rem; }
+.log-year li.mine .eyebrow { color: var(--accent); }
 .rules { display: grid; gap: 16px; max-width: 72ch; }
 .rules h3 { margin-top: 6px; }
 .rules p, .rules li { font-size: 0.94rem; }
@@ -585,6 +586,15 @@ var ENGINE = (function () {
     }
   ];
 
+  /* Niveaux de jeu : avantage ou handicap d'expérience de la société du joueur (coûts
+     unitaires plus bas ou plus hauts). Moduler l'agressivité des concurrents ne marchait
+     pas : moins agressifs, ils laissent leurs marchés en pénurie et gagnent davantage. */
+  const LEVELS = {
+    facile: { label: "Facile", playerX: 1.4, desc: "Vos équipes ont plus d'expérience que la concurrence : coûts unitaires plus bas." },
+    normal: { label: "Normal", playerX: 1, desc: "Mêmes conditions que les concurrents." },
+    difficile: { label: "Difficile", playerX: 0.75, desc: "Vos équipes ont moins d'expérience que la concurrence : coûts unitaires plus hauts." }
+  };
+
   const scenarioById = id => SCENARIOS.find(s => s.id === id);
   const segById = (G, id) => G.segments.find(s => s.id === id);
   const coById = (G, id) => G.companies.find(c => c.id === id);
@@ -616,6 +626,8 @@ var ENGINE = (function () {
       const s2 = segById(G, sid);
       if (s2.group === seg.group) x += G.params.groupX * co.div[sid].X / s2.Xnorm;
     }
+    // niveau de jeu : avantage (ou handicap) d'expérience de la société du joueur
+    if (co.player && G.params.playerX) x *= G.params.playerX;
     return Math.max(0.05, x);
   }
 
@@ -736,8 +748,9 @@ var ENGINE = (function () {
       mods: { g: {}, c: {} }, over: false, bankrupt: false, nextListingId: 1, results: []
     };
     G.params.rate0 = G.params.rate;
-    G.params.ai = { facile: 0.6, normal: 1, difficile: 1.3 }[opts.level || "normal"] || 1;
-    G.level = opts.level || "normal";
+    G.level = LEVELS[opts.level] ? opts.level : "normal";
+    G.params.playerX = LEVELS[G.level].playerX;
+    G.params.ai = 1;
     G.pinv = [];
     sc.segments.forEach(s => {
       const H = s.H || 8;
@@ -1015,6 +1028,24 @@ var ENGINE = (function () {
     return { divs, flows, netCash: (nc1 - nc0) / N0, shares, rest, dPrice: h1.price - h0.price, dps: h1.dps, dScore: h1.score - h0.score };
   }
 
+  /* ---------- Résumé lisible des décisions du joueur (journal) ---------- */
+  function decisionSummary(G, co, dec) {
+    const parts = [];
+    const inv = Object.keys(dec.invest).filter(sid => dec.invest[sid] > 0.5).sort((a, b) => dec.invest[b] - dec.invest[a]);
+    const tot = inv.reduce((a, sid) => a + dec.invest[sid], 0);
+    if (inv.length) parts.push("investissements " + fmt(tot) + " M€ (" + inv.slice(0, 4).map(sid => segById(G, sid).name + " " + fmt(dec.invest[sid])).join(", ") + (inv.length > 4 ? ", …" : "") + ")");
+    else parts.push("aucun investissement");
+    for (const sid in dec.disinvest) parts.push("désinvestissement de " + fmt(dec.disinvest[sid]) + " M€ dans « " + segById(G, sid).name + " »");
+    for (const sid in dec.divest) parts.push((dec.divest[sid].mode === "liq" ? "fermeture de « " : "mise en vente de « ") + segById(G, sid).name + " »");
+    parts.push("dividende " + pct(dec.payout, 0) + " du résultat");
+    if (dec.loan) parts.push("emprunt demandé " + fmt(dec.loan.amount) + " M€ sur " + dec.loan.years + " ans");
+    if (dec.issuePct > 0) parts.push("augmentation de capital " + pct(dec.issuePct, 0));
+    if (dec.buybackPct > 0) parts.push("rachat d'actions " + pct(dec.buybackPct, 0));
+    const bids = Object.keys(dec.bids);
+    if (bids.length) parts.push(bids.length + " offre" + (bids.length > 1 ? "s" : "") + " de rachat (" + fmt(bids.reduce((a, k) => a + dec.bids[k], 0)) + " M€)");
+    return parts.join(" ; ") + ".";
+  }
+
   /* ---------- Nettoyage de la décision du joueur ---------- */
   function sanitize(G, co, dec) {
     dec = dec || {};
@@ -1051,6 +1082,7 @@ var ENGINE = (function () {
     const alive = G.companies.filter(c => c.alive);
     const decs = {};
     alive.forEach(co => { decs[co.id] = co.player ? sanitize(G, co, playerDec) : aiDecide(G, co); });
+    alive.filter(co => co.player).forEach(co => G.log.push({ t, kind: "vos décisions", text: decisionSummary(G, co, decs[co.id]) }));
     alive.forEach(co => {
       co._exc = 0; co._cash0 = co.cash; co._loanOut0 = co.loan ? co.loan.out : 0; co._loanRate = co.loan ? co.loan.rate : 0;
       co._inv = 0; co._disinv = 0; co._issue = 0; co._buyback = 0; co._ma = 0; co._sold = {};
@@ -1295,10 +1327,128 @@ var ENGINE = (function () {
   }
 
   return {
-    VERSION, SCENARIOS, disinvestRate, aiDecide, preview, priceBridge, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
+    VERSION, SCENARIOS, LEVELS, disinvestRate, aiDecide, preview, priceBridge, PERSONAS, newGame, simulateYear, defaultDecision, investHints, maxLoan, loanRate, loanTotal,
     forecastGrowth, quadrant, segPER, assetFloor, segById, coById, lastH, valuation, pathGrowth, unitCost, fmt, pct, clamp, sum, sanitize
   };
 })();
+
+
+</script>
+<script>
+"use strict";
+/* ============================================================
+   LE CONSEIL — stratégies de référence
+   Partagées entre le jeu (comparaison au bilan final) et les outils de calibrage.
+   Chaque stratégie est une fonction (G, société du joueur) → décision.
+   ============================================================ */
+var STRATEGIES = (function (E) {
+
+  // garde-fou : ne pas engager plus que la trésorerie disponible et la moitié du découvert
+  function guardCash(G, co, d) {
+    const h = E.lastH(co);
+    const tot = Object.values(d.invest).reduce((a, b) => a + b, 0);
+    const avail = co.cash + h.npRec * (1 - d.payout) + h.dep - (co.loan ? co.loan.ann : 0) + 0.5 * co.overdraft;
+    if (tot > avail && tot > 0) { const k = Math.max(0, avail) / tot; for (const s in d.invest) d.invest[s] = Math.round(d.invest[s] * k); }
+    return d;
+  }
+
+  function base(G, co, mode) {
+    const d = E.defaultDecision(G, co);
+    for (const sid in co.div) {
+      const dv = co.div[sid], h = E.investHints(G, co, sid);
+      if (mode === "passif") continue;
+      if (dv.rs >= 1 && h.gF > 0) d.invest[sid] = h.follow;
+      else if (dv.rs < 0.5 && dv.lossYears >= 2 && h.gF < 0.05) d.divest[sid] = { mode: "liq" };
+      else if (h.gF < 0) d.invest[sid] = Math.round(0.5 * h.maint);
+      else d.invest[sid] = h.maint;
+    }
+    return d;
+  }
+
+  function entry(sid, share, years) {
+    return (G, co) => {
+      const d = base(G, co, "recentre");
+      const t = G.year + 1, seg = E.segById(G, sid), dv = co.div[sid];
+      if (seg && t <= years + 6) {
+        let target = Math.min(share, share * t / years);
+        // en pénurie, prendre la demande que les autres ne servent pas
+        if (dv && seg.r < 0.97) target = Math.max(target, Math.min(G.params.cap - 0.03, dv.share + (0.97 - seg.r)));
+        const Dn = seg.D * (1 + E.forecastGrowth(G, seg, t));
+        const Ka = dv ? dv.A * (1 - seg.dep) / seg.capex : 0;
+        d.invest[sid] = Math.max(d.invest[sid] || 0, Math.round((target * Dn / 0.97 - Ka) * seg.capex));
+        delete d.divest[sid];
+      }
+      d.payout = 0.2;
+      const ml = E.maxLoan(G, co);
+      if (ml > 10 && t < G.T - 4) d.loan = { amount: Math.round(0.7 * ml), years: 8 };
+      return guardCash(G, co, d);
+    };
+  }
+
+  function consolidate(sids) {
+    return (G, co) => {
+      const d = base(G, co, "recentre");
+      sids.forEach(sid => {
+        const dv = co.div[sid], seg = E.segById(G, sid);
+        if (!dv) return;
+        const h = E.investHints(G, co, sid);
+        delete d.divest[sid];
+        d.invest[sid] = h.gF > 0 && seg.r < 1.08 ? h.plus5 : h.follow;
+      });
+      d.payout = 0.2;
+      const ml = E.maxLoan(G, co);
+      if (ml > 10 && G.year + 1 < G.T - 4) d.loan = { amount: Math.round(0.5 * ml), years: 8 };
+      return guardCash(G, co, d);
+    };
+  }
+
+  function persona(k) {
+    // la société du joueur pilotée par la logique d'un concurrent
+    return (G, co) => {
+      co.persona = k;
+      try { return E.aiDecide(G, co); } finally { co.persona = null; }
+    };
+  }
+
+  /* Liste ordonnée des stratégies d'un scénario : { key, label, desc, fn } */
+  function list(scId) {
+    const G0 = E.newGame(scId, { seed: 1 });
+    const pl = G0.companies.find(c => c.player);
+    const L = [
+      { key: "passif", label: "Passivité", desc: "Maintenir les actifs partout, sans entrée ni sortie.", fn: (G, co) => base(G, co, "passif") },
+      { key: "recentre", label: "Recentrage", desc: "Suivre le marché là où l'on est leader, réduire les créneaux en déclin, fermer les petites positions déficitaires.", fn: (G, co) => guardCash(G, co, base(G, co, "recentre")) }
+    ];
+    G0.segments.filter(s => !pl.div[s.id] && E.forecastGrowth(G0, s, 1) > 0.02).forEach(s => {
+      const share = s.capex > 1.8 ? 0.10 : 0.15;
+      L.push({ key: "entrée " + s.id, label: "Entrée : " + s.name, desc: "Recentrage, plus une entrée progressive jusqu'à " + Math.round(share * 100) + " % du marché en quatre exercices, financée par emprunt.", fn: entry(s.id, share, 4) });
+    });
+    G0.segments.filter(s => pl.div[s.id] && pl.div[s.id].rs < 1 && E.forecastGrowth(G0, s, 1) > 0.07).forEach(s => {
+      const share = Math.min(0.35, pl.div[s.id].share + 0.15);
+      L.push({ key: "pousser " + s.id, label: "Offensive : " + s.name, desc: "Recentrage, plus une montée à " + Math.round(share * 100) + " % de part de marché en cinq exercices, financée par emprunt.", fn: entry(s.id, share, 5) });
+    });
+    const groups = {};
+    for (const sid in pl.div) { const g = E.segById(G0, sid).group; (groups[g] = groups[g] || []).push(sid); }
+    for (const g in groups) if (groups[g].length >= 3) {
+      const names = groups[g].map(sid => E.segById(G0, sid).name);
+      L.push({ key: "consolider " + g, label: "Consolidation d'un métier", desc: "Gagner des parts dans les divisions qui partagent leur expérience : " + names.join(", ") + ".", fn: consolidate(groups[g]) });
+    }
+    ["gardien", "conquerant", "diversifieur"].forEach(k => {
+      L.push({ key: "IA " + k, label: "Style « " + E.PERSONAS[k].label.toLowerCase() + " »", desc: "La logique d'un concurrent appliquée à votre société : " + E.PERSONAS[k].desc.charAt(0).toLowerCase() + E.PERSONAS[k].desc.slice(1), fn: persona(k) });
+    });
+    return L;
+  }
+
+  /* Rejoue une partie avec une stratégie : même scénario, même graine, même durée, même niveau */
+  function replay(G, strat) {
+    const H = E.newGame(G.sc, { seed: G.seed, years: G.T, level: G.level });
+    const co = H.companies.find(c => c.player);
+    while (!H.over) E.simulateYear(H, strat(H, co));
+    const s = E.lastH(co).score;
+    return { score: s, rank: 1 + H.companies.filter(c => !c.player && E.lastH(c).score > s).length, bankrupt: H.bankrupt, n: H.companies.length };
+  }
+
+  return { list, replay, guardCash };
+})(typeof ENGINE !== "undefined" ? ENGINE : require("./engine.js"));
 
 
 </script>
@@ -1323,7 +1473,7 @@ var ENGINE = (function () {
 
   const S = {
     G: null, draft: null, q: {}, tab: "conseil", result: null, matrixCo: "P", confirmRisk: false,
-    sel: { scenario: "industrie", years: 15, timer: 0, name: "", seed: "" }, deadline: 0
+    sel: { scenario: "industrie", years: 15, timer: 0, name: "", seed: "", level: "normal" }, deadline: 0, refs: null
   };
 
   /* ---------------- utilitaires ---------------- */
@@ -1511,7 +1661,9 @@ var ENGINE = (function () {
       boxes.push([x - w / 2, y - hgt + 3, x + w / 2, y + 3]);
       labels.push(`<text x="${x}" y="${y}" text-anchor="middle" font-size="11" style="fill:var(--ink)">${esc(txt)}</text>`);
     });
-    s += circles.join("") + labels.join("");
+    // les bulles sont découpées au cadre du graphique (une part relative extrême les poussait au-delà)
+    s += `<defs><clipPath id="bcg-clip"><rect x="${ml}" y="${mt}" width="${W - ml - mr}" height="${H - mt - mb}"/></clipPath></defs>`;
+    s += `<g clip-path="url(#bcg-clip)">${circles.join("")}</g>` + labels.join("");
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Matrice part de marché relative et croissance de ${esc(co.name)}">${s}</svg>`;
   }
 
@@ -1580,11 +1732,12 @@ var ENGINE = (function () {
     <div class="section-head"><h2>Conditions de séance</h2></div>
     <div class="opts">
       <div class="field"><label for="o-years">Durée du mandat</label><select id="o-years" data-o="years">${[10, 15, 20].map(y => `<option value="${y}" ${S.sel.years === y ? "selected" : ""}>${y} exercices</option>`).join("")}</select></div>
+      <div class="field"><label for="o-level">Niveau</label><select id="o-level" data-o="level">${Object.keys(E.LEVELS).map(k => `<option value="${k}" ${S.sel.level === k ? "selected" : ""}>${E.LEVELS[k].label}</option>`).join("")}</select></div>
       <div class="field"><label for="o-timer">Temps par exercice</label><select id="o-timer" data-o="timer">${[[0, "Illimité"], [180, "3 minutes"], [300, "5 minutes"]].map(([v, l]) => `<option value="${v}" ${S.sel.timer === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="field"><label for="o-name">Nom de votre société</label><input id="o-name" type="text" data-o="name" maxlength="32" placeholder="${esc(sc.find(s => s.id === S.sel.scenario).companies[0].name)}" value="${esc(S.sel.name)}"></div>
       <div class="field"><label for="o-seed">Graine (facultatif)</label><input id="o-seed" type="number" data-o="seed" inputmode="numeric" placeholder="Aléatoire" value="${esc(S.sel.seed)}"></div>
     </div>
-    <p class="small muted">Une même graine rejoue exactement la même conjoncture : utile pour comparer deux stratégies.</p>
+    <p class="small muted">Niveau ${esc((E.LEVELS[S.sel.level] || E.LEVELS.normal).label.toLowerCase())} : ${esc((E.LEVELS[S.sel.level] || E.LEVELS.normal).desc)} Une même graine rejoue exactement la même conjoncture : utile pour comparer deux stratégies.</p>
   </section>
   <div class="row"><button class="btn seal" data-act="start">Prendre la présidence</button></div>
 </main>`;
@@ -1603,7 +1756,7 @@ var ENGINE = (function () {
     app.innerHTML = `
 <div class="topbar"><div class="wrap">
   <div class="topline">
-    <div class="row" style="gap:8px"><span class="mini-brand">Le <em>Conseil</em></span><span class="muted small">${esc(co.name)} · ${esc(G.title)}</span></div>
+    <div class="row" style="gap:8px"><span class="mini-brand">Le <em>Conseil</em></span><span class="muted small">${esc(co.name)} · ${esc(G.title)}${G.level && G.level !== "normal" ? " · niveau " + esc(E.LEVELS[G.level].label.toLowerCase()) : ""}</span></div>
     <div class="exercise">${over ? "Mandat achevé" : `Exercice <b>${yearOf(t)}</b> · ${t}/${G.T}`}</div>
   </div>
   <div class="kpis">
@@ -1948,7 +2101,7 @@ ${S.result ? renderSheet() : ""}`;
     const G = S.G, by = {};
     G.log.forEach(e => { (by[e.t] = by[e.t] || []).push(e); });
     const ts = Object.keys(by).map(Number).sort((a, b) => b - a);
-    return `<section class="section"><div class="section-head"><h2>Journal des séances</h2></div><div class="log">${ts.map(t => `<div class="log-year"><h3>Exercice ${yearOf(t)}</h3><ul>${by[t].map(e => `<li><span class="eyebrow">${esc(e.kind)}</span> ${esc(e.text)}</li>`).join("")}</ul></div>`).join("") || '<p class="muted">Rien à signaler pour l\'instant.</p>'}</div></section>`;
+    return `<section class="section"><div class="section-head"><h2>Journal des séances</h2></div><div class="log">${ts.map(t => `<div class="log-year"><h3>Exercice ${yearOf(t)}</h3><ul>${by[t].map(e => `<li class="${e.kind === "vos décisions" ? "mine" : ""}"><span class="eyebrow">${esc(e.kind)}</span> ${esc(e.text)}</li>`).join("")}</ul></div>`).join("") || '<p class="muted">Rien à signaler pour l\'instant.</p>'}</div></section>`;
   }
 
   /* ---------------- Règles ---------------- */
@@ -1984,6 +2137,32 @@ ${S.result ? renderSheet() : ""}`;
 </section>`;
   }
 
+  /* ---------------- Comparaison aux stratégies de référence ----------------
+     Même scénario, même graine, même durée, même niveau : la conjoncture est identique,
+     seules les décisions changent (et les réactions des concurrents qui en découlent). */
+  function referenceRuns(G) {
+    const key = [G.sc, G.seed, G.T, G.level].join("|");
+    if (S.refs && S.refs.key === key) return S.refs.rows;
+    const rows = STRATEGIES.list(G.sc).map(x => Object.assign({ label: x.label, desc: x.desc }, STRATEGIES.replay(G, x.fn)));
+    S.refs = { key, rows };
+    return rows;
+  }
+  function referenceBlock(G, co, rank, n) {
+    let rows;
+    try { rows = referenceRuns(G); } catch (e) { return ""; }
+    const mine = { label: "Votre partie", desc: "", score: lastH(co).score, rank, bankrupt: G.bankrupt, me: true };
+    const eps = 1e-6; // égalité à l'arrondi près : même score, même place
+    const all = rows.concat([mine]).sort((a, b) => (b.score - a.score > eps ? 1 : a.score - b.score > eps ? -1 : (b.me ? 1 : 0) - (a.me ? 1 : 0)));
+    const better = rows.filter(r => r.score > mine.score + eps).length;
+    const pos = better + 1;
+    const lead = better === 0 ? "Aucune stratégie de référence ne fait mieux que vous sur cette conjoncture."
+      : `${better} stratégie${better > 1 ? "s" : ""} de référence sur ${rows.length} ${better > 1 ? "font" : "fait"} mieux que vous sur cette conjoncture.`;
+    return `<section class="section refs"><div class="section-head"><h2>Et avec une autre stratégie ?</h2><span class="muted small">Même conjoncture (graine ${G.seed}), mêmes concurrents ; seules les décisions changent</span></div>
+  <p>${lead} Votre partie se classe ${pos === 1 ? "1<sup>re</sup>" : pos + "<sup>e</sup>"} sur ${all.length}${rows.some(r => Math.abs(r.score - mine.score) <= eps) ? " (ex æquo)" : ""}.</p>
+  <div class="tbl-wrap"><table><thead><tr><th>Stratégie</th><th>Score</th><th>Rang final</th></tr></thead><tbody>${all.map(r => `<tr class="${r.me ? "me" : ""}"><td style="white-space:normal">${esc(r.label)}${r.desc ? `<div class="small muted" style="font-weight:400">${esc(r.desc)}</div>` : ""}</td><td>${fmt(r.score, 2)}</td><td>${r.bankrupt ? '<span class="bad">faillite</span>' : r.rank + "/" + n}</td></tr>`).join("")}</tbody></table></div>
+  <p class="small muted">Les concurrents réagissent aux décisions de chaque stratégie : leurs propres résultats changent d'une ligne à l'autre. Rejouez la graine pour tenter mieux.</p></section>`;
+  }
+
   /* ---------------- Bilan final ---------------- */
   function tabBilan() {
     const G = S.G, co = player(), h = lastH(co);
@@ -2009,10 +2188,11 @@ ${S.result ? renderSheet() : ""}`;
     const exits = G.log.filter(e => e.text.indexOf(co.name) === 0 && (/ferme/.test(e.text) || /quitte le créneau/.test(e.text))).length + G.log.filter(e => e.kind === "cession" && e.text.indexOf("à " + co.name + " pour") >= 0).length;
     const chart = lineChart(G.companies.map(c => ({ label: c.name.split(" ")[0], color: c.color, w: c.player ? 2.8 : 1.6, pts: c.hist.map(x => [yearOf(x.t), x.score]) })), { aria: "Évolution des scores", h: 260, fy: v => fmt(v, 0) });
     return `<section class="section podium">
-  <div><div class="eyebrow">Assemblée générale de clôture · ${esc(G.title)} · graine ${G.seed}</div><p class="verdict">${verdict}</p></div>
+  <div><div class="eyebrow">Assemblée générale de clôture · ${esc(G.title)} · graine ${G.seed} · niveau ${esc(E.LEVELS[G.level || "normal"].label.toLowerCase())}</div><p class="verdict">${verdict}</p></div>
   <div class="statgrid">${stat("Score final", fmt(h.score, 2))}${stat("Rendement total pour l'actionnaire", pct(tsr, 0), tsr < 0 ? "bad" : "good")}${stat("Rendement annuel moyen", pct(cagr, 1), cagr < 0 ? "bad" : "")}${stat("Chiffre d'affaires final", M(h.rev))}${stat("Résultat net courant final", M(h.npRec), h.npRec < 0 ? "bad" : "")}${stat("Dette finale", M(h.debt))}</div>
   <div class="tbl-wrap"><table><thead><tr><th>Société</th><th style="text-align:left">Profil</th><th>Score</th><th>Cours</th><th>Div. cumulés</th><th>CA final</th><th>RN final</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   <div class="panel">${chart}</div>
+  ${referenceBlock(G, co, rank, list.length)}
   <div class="fin-grid">
     <div class="panel"><b>Où sont allés vos investissements</b>${qbar}<p class="small muted">Position de la division au moment de chaque décision. Total investi : ${M(totInv)} ; ${entries} entrée${entries > 1 ? "s" : ""} sur un nouveau créneau, ${exits} sortie${exits > 1 ? "s" : ""}.</p></div>
     <div class="panel"><b>Profils des concurrents</b>${G.companies.filter(c => !c.player).map(c => `<p class="small"><b>${esc(c.name)}</b> — ${esc(E.PERSONAS[c.persona].label)} : ${esc(E.PERSONAS[c.persona].desc)}</p>`).join("")}</div>
@@ -2071,7 +2251,8 @@ ${S.result ? renderSheet() : ""}`;
   function startGame(opts) {
     clearInterval(timerH); timerH = null;
     const seed = opts.seed ? (Math.abs(parseInt(opts.seed, 10)) >>> 0) || 1 : ((Math.random() * 4294967295) >>> 0) || 7;
-    S.G = E.newGame(opts.scenario, { seed, years: opts.years, playerName: (opts.name || "").trim() || undefined });
+    S.G = E.newGame(opts.scenario, { seed, years: opts.years, level: opts.level, playerName: (opts.name || "").trim() || undefined });
+    S.refs = null;
     S.draft = freshDraft();
     S.tab = "conseil"; S.result = null; S.matrixCo = "P";
     openYear();
@@ -2183,7 +2364,7 @@ ${S.result ? renderSheet() : ""}`;
     if (act === "new") { clearSaved(); S.G = null; S.result = null; render(); window.scrollTo(0, 0); return; }
     if (act === "replay") {
       const G = S.G;
-      startGame({ scenario: G.sc, years: G.T, seed: String(G.seed), name: player().name === E.SCENARIOS.find(s => s.id === G.sc).companies[0].name ? "" : player().name });
+      startGame({ scenario: G.sc, years: G.T, level: G.level, seed: String(G.seed), name: player().name === E.SCENARIOS.find(s => s.id === G.sc).companies[0].name ? "" : player().name });
       return;
     }
     if (act === "dq") {
@@ -2212,6 +2393,7 @@ ${S.result ? renderSheet() : ""}`;
     if (el.dataset.o) {
       const k = el.dataset.o;
       S.sel[k] = (k === "years" || k === "timer") ? +el.value : el.value;
+      if (k === "level") renderHome();
       return;
     }
     const k = el.dataset.k;

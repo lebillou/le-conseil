@@ -26,7 +26,9 @@ Ou ouvrir `index.html` dans un navigateur : le fichier est autonome, sans serveu
 - Concurrents aux profils différents (gardien du métier, conquérant, rentier, diversifieur, opportuniste), révélés en fin de partie.
 - Aperçu de l'exercice avant validation (conjoncture sans aléa, concurrents au rythme de leur marché) et décomposition de la variation du cours par division dans le procès-verbal.
 - Faillite d'un concurrent : ses divisions sont vendues par le liquidateur l'exercice suivant.
-- Matrice BCG, comptes consolidés, journal, chronomètre optionnel, graine pour rejouer la même conjoncture.
+- Trois niveaux de jeu : la société du joueur a plus (facile) ou moins (difficile) d'expérience que ses concurrents.
+- Bilan final : la partie est comparée à une dizaine de stratégies de référence rejouées sur la même graine.
+- Matrice BCG, comptes consolidés, journal des événements et de vos décisions, chronomètre optionnel, graine pour rejouer la même conjoncture.
 
 Score = cours + dividendes cumulés par action. La valeur de la société est la somme de ses divisions (PER sectoriel × résultat opérationnel normatif après impôt, avec un plancher en fraction des actifs qui dépend de la croissance du créneau), plus la trésorerie, moins la dette. Toutes les sociétés démarrent à 10 €. Les règles détaillées sont dans l'onglet « Règles » du jeu.
 
@@ -36,6 +38,7 @@ Score = cours + dividendes cumulés par action. La valeur de la société est la
 index.html        page jouable, générée par build.py (ne pas éditer à la main)
 build.py          assemble src/ en index.html
 src/engine.js     moteur de simulation pur, sans DOM (utilisable sous Node)
+src/strategies.js stratégies de référence, partagées entre le bilan du jeu et les outils
 src/ui.js         interface
 src/shell.html    gabarit HTML et feuille de style
 tools/            tests et simulations sans interface pour le calibrage
@@ -47,6 +50,7 @@ tools/            tests et simulations sans interface pour le calibrage
 python3 build.py                 # régénère index.html après modification de src/
 node tools/check.js              # tests de non-régression (reproductibilité, comptabilité, règles, calibrage)
 node tools/strategies.js froid   # stratégies lisibles comparées sur 20 graines : score, rang, victoires
+node tools/ui_test.js            # tests d'interface dans Chromium (Playwright requis)
 node tools/test_sim.js           # 20 parties par scénario avec trois stratégies simples
 node tools/search.js froid 200   # recherche aléatoire de stratégies sur un scénario
 node tools/dbg.js transport 1 P  # trajectoire d'une société sur une graine donnée
